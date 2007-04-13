@@ -1967,4 +1967,6 @@ end:           equ  $
 size:          equ  end-base
 
 ; For testing we include a sample tune (not supplied)
-;INCLUDE "tune.asm"
+IF defined (USE_TUNE)
+INCLUDE "tune.asm"
+ENDIF
