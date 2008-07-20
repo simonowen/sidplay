@@ -326,8 +326,10 @@ execute:       ex   de,hl           ; PC stays in DE throughout
                ld   iy,0            ; X=0, Y=0
                ld   ix,main_loop    ; decode loop after non-read/write
 
-               and  a               ; set Z, clear C+N
-               ex   af,af'          ; set A from Z80 accumulator
+               ld   b,a
+               xor  a               ; set Z, clear C+N
+               ld   a,b             ; A from Z80 accumulator
+               ex   af,af'          ; set A and flags
 
                exx
                ld   hl,&01ff        ; 6502 stack pointer in HL'
@@ -702,7 +704,7 @@ i_brk:         ld   a,ret_brk
 ;              ld   a,c
 ;              and  %10000001       ; keep N and C
 ;              bit  6,c             ; check Z
-;              jr   nz,brk_nonzero
+;              jr   z,brk_nonzero
 ;              or   %00000010       ; set Z
 ;brk_nonzero:  or   E               ; merge V
 ;              or   D               ; merge T D I
@@ -755,11 +757,11 @@ i_php:         ex   af,af'          ; A+flags
                ld   a,c
                and  %10000001       ; keep Z80 N and C
                bit  6,c             ; check Z80 Z
-               jr   nz,php_nonzero
+               jr   z,php_nonzero
                or   %00000010       ; set Z
 php_nonzero:   exx
-               or   E               ; merge V
-               or   D               ; merge T D I
+               or   e               ; merge V
+               or   d               ; merge T D I
                or   %00010000       ; B always pushed as 1
                ld   (hl),a
                dec  l               ; S--
@@ -776,7 +778,7 @@ i_plp:         exx                  ; PLP
                ld   a,c
                and  %10000001       ; keep N and C
                bit  1,c
-               jr   nz,plp_nonzero
+               jr   z,plp_nonzero
                or   %01000000       ; set Z
 plp_nonzero:   exx
                ld   c,a             ; flags
