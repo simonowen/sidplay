@@ -326,15 +326,15 @@ execute:       ex   de,hl           ; PC stays in DE throughout
                ld   iy,0            ; X=0, Y=0
                ld   ix,main_loop    ; decode loop after non-read/write
 
-               ld   b,a
-               xor  a               ; set Z, clear C+N
-               ld   a,b             ; A from Z80 accumulator
-               ex   af,af'          ; set A and flags
+               ld   b,a             ; set A from Z80 A
+               xor  a               ; clear carry
+               ld   c,a             ; set Z, clear N
+               ex   af,af'
 
                exx
                ld   hl,&01ff        ; 6502 stack pointer in HL'
                ld   d,%00000100     ; interrupts disabled
-               ld   e,%00000000     ; clear V
+               ld   e,0             ; clear V
                exx
 
 read_write_loop:
@@ -517,15 +517,15 @@ i_undoc_2:     inc  de              ; 2-byte NOP
                jp   (ix)
 
 
-i_bpl:         ex   af,af'
-               jp   p,i_branch_ex   ; branch if plus
-               ex   af,af'
+i_bpl:         inc  c
+               dec  c
+               jp   p,i_branch      ; branch if plus
                inc  de
                jp   (ix)
 
-i_bmi:         ex   af,af'
-               jp   m,i_branch_ex   ; branch if minus
-               ex   af,af'
+i_bmi:         inc  c
+               dec  c
+               jp   m,i_branch      ; branch if minus
                inc  de
                jp   (ix)
 
@@ -555,15 +555,15 @@ i_bcs:         ex   af,af'
                inc  de
                jp   (ix)
 
-i_beq:         ex   af,af'
-               jr   z,i_branch_ex   ; branch if zero
-               ex   af,af'
+i_beq:         inc  c
+               dec  c
+               jr   z,i_branch      ; branch if zero
                inc  de
                jp   (ix)
 
-i_bne:         ex   af,af'
-               jr   nz,i_branch_ex  ; branch if not zero
-               ex   af,af'
+i_bne:         inc  c
+               dec  c
+               jr   nz,i_branch     ; branch if not zero
                inc  de
                jp   (ix)
 
@@ -642,14 +642,11 @@ last_regs:     defs 32              ; last values written to SID
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-i_clc:         ex   af,af'          ; clear carry
-               scf
-               ccf
+i_clc:         and  a               ; clear carry
                ex   af,af'
                jp   (ix)
 
-i_sec:         ex   af,af'          ; set carry
-               scf
+i_sec:         scf                  ; set carry
                ex   af,af'
                jp   (ix)
 
@@ -688,18 +685,20 @@ i_sed:         exx
 i_brk:         ld   a,ret_brk
                ret
 ;              inc  de              ; return to BRK+2
-;              ld   a,d
+;              ld   a,d             ; PCH
 ;              exx
-;              ld   (hl),a          ; push return MSB
+;              ld   (hl),a          ; push return PCH
 ;              dec  l               ; S--
 ;              exx
-;              ld   a,e
+;              ld   a,e             ; PCL
 ;              exx
-;              ld   (hl),a          ; push return LSB
+;              ld   (hl),a          ; push return PCL
 ;              dec  l               ; S--
-;              ex   af,af'          ; A+flags
+;              ex   af,af'          ; carry
+;              inc  c
+;              dec  c               ; set N Z
 ;              push af              ; save flags
-;              ex   af,af'          ; protect A
+;              ex   af,af'          ; save carry
 ;              pop  bc
 ;              ld   a,c
 ;              and  %10000001       ; keep N and C
@@ -709,14 +708,14 @@ i_brk:         ld   a,ret_brk
 ;brk_nonzero:  or   E               ; merge V
 ;              or   D               ; merge T D I
 ;              or   %00010000       ; set B
-;              ld   (hl),a         ; push P
+;              ld   (hl),a          ; push P
 ;              dec  l               ; S--
 ;              exx
 ;              ld   de,(m6502_int)  ; fetch interrupt handler
 ;              jp   (ix)
 
 
-i_rti:         exx                  ; RTI
+i_rti:         exx
                inc  l               ; S++
                ld   a,ret_ok
                ret  z               ; finish if stack empty
@@ -729,16 +728,23 @@ i_rti:         exx                  ; RTI
                and  %01000000       ; keep V
                ld   e,a             ; set V
                ld   a,c
-               and  %10000001       ; keep N and C
-               bit  1,c
-               jr   nz,rti_nonzero
-               or   %01000000       ; set Z
-rti_nonzero:   ld   c,a             ; set flags
-               ex   af,af'
-               ld   b,a             ; A
-               push bc              ; save for later
+               rra                  ; carry from C
+               ex   af,af'          ; set carry
+               ld   a,c
+               and  %10000010       ; keep N Z
+               xor  %00000010       ; zero for Z
+               exx
+               ld   c,a             ; set N Z
+               exx
                inc  l               ; S++
                ld   a,(hl)          ; pop return LSB
+               exx
+               ld   e,a             ; PCL
+               exx
+               inc  l               ; S++
+               ld   a,(hl)          ; pop return MSB
+               exx
+               ld   d,a             ; PCH
                ex   af,af'
                inc  l               ; S++
                ld   a,(hl)          ; pop return MSB
@@ -750,17 +756,19 @@ rti_nonzero:   ld   c,a             ; set flags
                ex   af,af'          ; set A and flags
                jp   (ix)
 
-i_php:         ex   af,af'          ; A+flags
+i_php:         ex   af,af'          ; carry
+               inc  c
+               dec  c               ; set N Z
                push af              ; save flags
-               ex   af,af'          ; protect A
+               ex   af,af'          ; protect carry
+               exx
                pop  bc
                ld   a,c
                and  %10000001       ; keep Z80 N and C
                bit  6,c             ; check Z80 Z
                jr   z,php_nonzero
                or   %00000010       ; set Z
-php_nonzero:   exx
-               or   e               ; merge V
+php_nonzero:   or   e               ; merge V
                or   d               ; merge T D I
                or   %00010000       ; B always pushed as 1
                ld   (hl),a
@@ -768,93 +776,73 @@ php_nonzero:   exx
                exx
                jp   (ix)
 
-i_plp:         exx                  ; PLP
+i_plp:         exx
                inc  l               ; S++
-               ld   a,(hl)          ; P
+               ld   a,(hl)          ; pop P
                ld   c,a             ; keep safe
                and  %00001100       ; keep D and I
                or   %00110000       ; force T and B
                ld   d,a             ; set P
                ld   a,c
-               and  %10000001       ; keep N and C
-               bit  1,c
-               jr   z,plp_nonzero
-               or   %01000000       ; set Z
-plp_nonzero:   exx
-               ld   c,a             ; flags
-               ex   af,af'
-               ld   b,a             ; A
-               push bc
-               pop  af
-               ex   af,af'          ; set A and flags
+               and  %01000000       ; keep V
+               ld   e,a             ; set V
+               ld   a,c
+               rra                  ; carry from C
+               ex   af,af'          ; set carry
+               ld   a,c
+               and  %10000010       ; keep N Z
+               xor  %00000010       ; zero for Z
+               exx
+               ld   c,a             ; set N Z
                jp   (ix)
 
-i_pha:         exx                  ; PHA
-               ex   af,af'
-               ld   (hl),a
-               ex   af,af'
+i_pha:         ld   a,b             ; A
+               exx
+               ld   (hl),a          ; push A
                dec  l               ; S--
                exx
                jp   (ix)
 
 i_pla:         exx                  ; PLA
                inc  l               ; S++
-               ex   af,af'
-               ld   a,(hl)
-               inc  a
-               dec  a
-               ex   af,af'          ; set A N Z
+               ld   a,(hl)          ; pop A
                exx
+               ld   b,a             ; set A
+               ld   c,a             ; set N Z
                jp   (ix)
 
 
-i_dex:         ex   af,af'
-               dec  iyh             ; X--
-               ex   af,af'          ; set N Z
+i_dex:         dec  iyh             ; X--
+               ld   c,iyh           ; set N Z
                jp   (ix)
 
-i_dey:         ex   af,af'
-               dec  iyl             ; Y--
-               ex   af,af'          ; set N Z
+i_dey:         dec  iyl             ; Y--
+               ld   c,iyl           ; set N Z
                jp   (ix)
 
-i_inx:         ex   af,af'
-               inc  iyh             ; X++
-               ex   af,af'          ; set N Z
+i_inx:         inc  iyh             ; X++
+               ld   c,iyh           ; set N Z
                jp   (ix)
 
-i_iny:         ex   af,af'
-               inc  iyl             ; Y++
-               ex   af,af'          ; set N Z
+i_iny:         inc  iyl             ; Y++
+               ld   c,iyl           ; set N Z
                jp   (ix)
 
 
-i_txa:         ex   af,af'
-               ld   a,iyh           ; A=X
-               inc  a
-               dec  a
-               ex   af,af'          ; set A N Z
+i_txa:         ld   b,iyh           ; A=X
+               ld   c,b             ; set N Z
                jp   (ix)
 
-i_tya:         ex   af,af'
-               ld   a,iyl           ; A=Y
-               inc  a
-               dec  a
-               ex   af,af'          ; set A N Z
+i_tya:         ld   b,iyl           ; A=Y
+               ld   c,b             ; set N Z
                jp   (ix)
 
-i_tax:         ex   af,af'
-               inc  a
-               dec  a
-               ld   iyh,a           ; X=A
-               ex   af,af'          ; set N Z
+i_tax:         ld   iyh,b           ; X=A
+               ld   c,b             ; set N Z
                jp   (ix)
 
-i_tay:         ex   af,af'
-               inc  a
-               dec  a
-               ld   iyl,a           ; Y=A
-               ex   af,af'          ; set N Z
+i_tay:         ld   iyl,b           ; Y=A
+               ld   c,b             ; set N Z
                jp   (ix)
 
 i_txs:         ld   a,iyh           ; X
@@ -863,14 +851,11 @@ i_txs:         ld   a,iyh           ; X
                exx
                jp   (ix)
 
-i_tsx:         exx                  ; TSX
-               ld   a,l             ; fetch S
-               ld   iyh,a           ; X=S
-               ex   af,af'
-               inc  l
-               dec  l
-               ex   af,af'          ; set N Z
+i_tsx:         exx
+               ld   a,l             ; S
                exx
+               ld   iyh,a           ; X=S
+               ld   c,a             ; set N Z
                jp   (ix)
 
 
@@ -883,22 +868,16 @@ i_lda_ix:      ld   a,(de)          ; LDA ($nn,X)
                inc  hl
                ld   h,(hl)
                ld   l,a
-               ex   af,af'
-               ld   a,(hl)
-               inc  a
-               dec  a
-               ex   af,af'          ; set A N Z
+               ld   b,(hl)          ; set A
+               ld   c,b             ; set N Z
                jp   zread_loop
 
 i_lda_z:       ld   a,(de)          ; LDA $nn
                inc  de
                ld   l,a
                ld   h,0
-               ex   af,af'
-               ld   a,(hl)
-               inc  a
-               dec  a
-               ex   af,af'          ; set A N Z
+               ld   b,(hl)          ; set A
+               ld   c,b             ; set N Z
                jp   zread_loop
 
 i_lda_a:       ex   de,hl           ; LDA $nnnn
@@ -907,11 +886,8 @@ i_lda_a:       ex   de,hl           ; LDA $nnnn
                ld   d,(hl)
                inc  hl
                ex   de,hl
-               ex   af,af'
-               ld   a,(hl)
-               inc  a
-               dec  a
-               ex   af,af'          ; set A N Z
+               ld   b,(hl)          ; set A
+               ld   c,b             ; set N Z
                jp   read_loop
 
 i_lda_iy:      ld   a,(de)          ; LDA ($nn),Y
@@ -926,11 +902,8 @@ i_lda_iy:      ld   a,(de)          ; LDA ($nn),Y
                ld   a,0
                adc  a,h
                ld   h,a
-               ex   af,af'
-               ld   a,(hl)
-               inc  a
-               dec  a
-               ex   af,af'          ; set A N Z
+               ld   b,(hl)          ; set A
+               ld   c,b             ; set N Z
                jp   read_loop
 
 i_lda_zx:      ld   a,(de)          ; LDA $nn,X
@@ -938,11 +911,8 @@ i_lda_zx:      ld   a,(de)          ; LDA $nn,X
                add  a,iyh           ; add X (may wrap in zero page)
                ld   l,a
                ld   h,0
-               ex   af,af'
-               ld   a,(hl)
-               inc  a
-               dec  a
-               ex   af,af'          ; set A N Z
+               ld   b,(hl)          ; set A
+               ld   c,b             ; set N Z
                jp   zread_loop
 
 i_lda_ay:      ld   a,(de)          ; LDA $nnnn,Y
@@ -953,11 +923,8 @@ i_lda_ay:      ld   a,(de)          ; LDA $nnnn,Y
                inc  de
                adc  a,0
                ld   h,a
-               ex   af,af'
-               ld   a,(hl)
-               inc  a
-               dec  a
-               ex   af,af'          ; set A N Z
+               ld   b,(hl)          ; set A
+               ld   c,b             ; set N Z
                jp   read_loop
 
 i_lda_ax:      ld   a,(de)          ; LDA $nnnn,X
@@ -968,19 +935,14 @@ i_lda_ax:      ld   a,(de)          ; LDA $nnnn,X
                inc  de
                adc  a,0
                ld   h,a
-               ex   af,af'
-               ld   a,(hl)
-               inc  a
-               dec  a
-               ex   af,af'          ; set A N Z
+               ld   b,(hl)          ; set A
+               ld   c,b             ; set N Z
                jp   read_loop
 
-i_lda_i:       ex   af,af'
-               ld   a,(de)          ; LDA #$nn
+i_lda_i:       ld   a,(de)          ; LDA #$nn
                inc  de
-               inc  a
-               dec  a
-               ex   af,af'          ; set A N Z
+               ld   b,a             ; set A
+               ld   c,b             ; set N Z
                jp   (ix)
 
 
@@ -988,12 +950,8 @@ i_ldx_z:       ld   a,(de)          ; LDX $nn
                inc  de
                ld   l,a
                ld   h,0
-               ld   b,(hl)
-               ld   iyh,b           ; set X
-               ex   af,af'
-               inc  b
-               dec  b
-               ex   af,af'          ; set N Z
+               ld   c,(hl)          ; set N Z
+               ld   iyh,c           ; set X
                jp   zread_loop
 
 i_ldx_a:       ex   de,hl           ; LDX $nnnn
@@ -1002,12 +960,8 @@ i_ldx_a:       ex   de,hl           ; LDX $nnnn
                ld   d,(hl)
                inc  hl
                ex   de,hl
-               ld   b,(hl)
-               ld   iyh,b           ; set X
-               ex   af,af'
-               inc  b
-               dec  b
-               ex   af,af'          ; set N Z
+               ld   c,(hl)          ; set N Z
+               ld   iyh,c           ; set X
                jp   read_loop
 
 i_ldx_zy:      ld   a,(de)          ; LDX $nn,Y
@@ -1015,12 +969,8 @@ i_ldx_zy:      ld   a,(de)          ; LDX $nn,Y
                add  a,iyl           ; add Y (may wrap in zero page)
                ld   l,a
                ld   h,0
-               ld   b,(hl)
-               ld   iyh,b           ; set X
-               ex   af,af'
-               inc  b
-               dec  b
-               ex   af,af'          ; set N Z
+               ld   c,(hl)          ; set N Z
+               ld   iyh,c           ; set X
                jp   zread_loop
 
 i_ldx_ay:      ld   a,(de)          ; LDX $nnnn,Y
@@ -1031,22 +981,14 @@ i_ldx_ay:      ld   a,(de)          ; LDX $nnnn,Y
                inc  de
                adc  a,0
                ld   h,a
-               ld   b,(hl)
-               ld   iyh,b           ; set X
-               ex   af,af'
-               inc  b
-               dec  b
-               ex   af,af'          ; set N Z
+               ld   c,(hl)          ; set N Z
+               ld   iyh,c           ; set X
                jp   read_loop
 
 i_ldx_i:       ld   a,(de)          ; LDX #$nn
                inc  de
-               ld   b,a
-               ld   iyh,b           ; set X
-               ex   af,af'
-               inc  b
-               dec  b
-               ex   af,af'          ; set N Z
+               ld   iyh,a           ; set X
+               ld   c,a             ; set N Z
                jp   (ix)
 
 
@@ -1054,12 +996,8 @@ i_ldy_z:       ld   a,(de)          ; LDY $nn
                inc  de
                ld   l,a
                ld   h,0
-               ld   b,(hl)
-               ld   iyl,b           ; set Y
-               ex   af,af'
-               inc  b
-               dec  b
-               ex   af,af'          ; set N Z
+               ld   c,(hl)          ; set N Z
+               ld   iyl,c           ; set Y
                jp   zread_loop
 
 i_ldy_a:       ex   de,hl           ; LDY $nnnn
@@ -1068,12 +1006,8 @@ i_ldy_a:       ex   de,hl           ; LDY $nnnn
                ld   d,(hl)
                inc  hl
                ex   de,hl
-               ld   b,(hl)
-               ld   iyl,b           ; set Y
-               ex   af,af'
-               inc  b
-               dec  b
-               ex   af,af'          ; set N Z
+               ld   c,(hl)          ; set N Z
+               ld   iyl,c           ; set Y
                jp   read_loop
 
 i_ldy_zx:      ld   a,(de)          ; LDY $nn,X
@@ -1081,12 +1015,8 @@ i_ldy_zx:      ld   a,(de)          ; LDY $nn,X
                add  a,iyh           ; add X (may wrap in zero page)
                ld   l,a
                ld   h,0
-               ld   b,(hl)
-               ld   iyl,b           ; set Y
-               ex   af,af'
-               inc  b
-               dec  b
-               ex   af,af'          ; set N Z
+               ld   c,(hl)          ; set N Z
+               ld   iyl,c           ; set Y
                jp   zread_loop
 
 i_ldy_ax:      ld   a,(de)          ; LDY $nnnn,X
@@ -1097,22 +1027,14 @@ i_ldy_ax:      ld   a,(de)          ; LDY $nnnn,X
                inc  de
                adc  a,0
                ld   h,a
-               ld   b,(hl)
-               ld   iyl,b           ; set Y
-               ex   af,af'
-               inc  b
-               dec  b
-               ex   af,af'          ; set N Z
+               ld   c,(hl)          ; set N Z
+               ld   iyl,c           ; set Y
                jp   read_loop
 
 i_ldy_i:       ld   a,(de)          ; LDY #$nn
                inc  de
-               ld   b,a
-               ld   iyl,b           ; set Y
-               ex   af,af'
-               inc  b
-               dec  b
-               ex   af,af'          ; set N Z
+               ld   c,a             ; set N Z
+               ld   iyl,c           ; set Y
                jp   (ix)
 
 
@@ -1125,18 +1047,14 @@ i_sta_ix:      ld   a,(de)          ; STA ($xx,X)
                inc  hl
                ld   h,(hl)
                ld   l,a
-               ex   af,af'
-               ld   (hl),a          ; store A
-               ex   af,af'
+               ld   (hl),b          ; store A
                jp   zwrite_loop
 
 i_sta_z:       ld   a,(de)          ; STA $nn
                inc  de
                ld   l,a
                ld   h,0
-               ex   af,af'
-               ld   (hl),a          ; store A
-               ex   af,af'
+               ld   (hl),b          ; store A
                jp   zwrite_loop
 
 i_sta_iy:      ld   a,(de)          ; STA ($nn),Y
@@ -1151,9 +1069,7 @@ i_sta_iy:      ld   a,(de)          ; STA ($nn),Y
                ld   a,0
                adc  a,h
                ld   h,a
-               ex   af,af'
-               ld   (hl),a          ; store A
-               ex   af,af'
+               ld   (hl),b          ; store A
                jp   write_loop
 
 i_sta_zx:      ld   a,(de)          ; STA $nn,X
@@ -1161,9 +1077,7 @@ i_sta_zx:      ld   a,(de)          ; STA $nn,X
                add  a,iyh           ; add X (may wrap in zero page)
                ld   l,a
                ld   h,0
-               ex   af,af'
-               ld   (hl),a          ; store A
-               ex   af,af'
+               ld   (hl),b          ; store A
                jp   zwrite_loop
 
 i_sta_ay:      ld   a,(de)          ; STA $nnnn,Y
@@ -1174,9 +1088,7 @@ i_sta_ay:      ld   a,(de)          ; STA $nnnn,Y
                inc  de
                adc  a,0
                ld   h,a
-               ex   af,af'
-               ld   (hl),a          ; store A
-               ex   af,af'
+               ld   (hl),b          ; store A
                jp   write_loop
 
 i_sta_ax:      ld   a,(de)          ; STA $nnnn,X
@@ -1187,9 +1099,7 @@ i_sta_ax:      ld   a,(de)          ; STA $nnnn,X
                inc  de
                adc  a,0
                ld   h,a
-               ex   af,af'
-               ld   (hl),a          ; store A
-               ex   af,af'
+               ld   (hl),b          ; store A
                jp   write_loop
 
 i_sta_a:       ex   de,hl           ; STA $nnnn
@@ -1198,9 +1108,7 @@ i_sta_a:       ex   de,hl           ; STA $nnnn
                ld   d,(hl)
                inc  hl
                ex   de,hl
-               ex   af,af'
-               ld   (hl),a          ; store A
-               ex   af,af'
+               ld   (hl),b          ; store A
                jp   write_loop
 
 
@@ -1358,18 +1266,21 @@ i_adc_iy:      ld   a,(de)          ; ADC ($nn),Y
 i_adc_i:       ld   h,d
                ld   l,e
                inc  de
-i_adc:         ex   af,af'
+i_adc:         ex   af,af'          ; carry
+               ld   a,b             ; A
                adc  a,(hl)          ; A+M+C
 adc_daa:       nop
+               ld   b,a             ; set A
+               ld   c,a             ; set N Z
                exx
                jp   pe,adcsbc_v
                ld   e,%00000000
                exx
-               ex   af,af'
+               ex   af,af'          ; set carry
                jp   read_loop
 adcsbc_v:      ld   e,%01000000
                exx
-               ex   af,af'
+               ex   af,af'          ; set carry
                jp   read_loop
 
 
@@ -1442,16 +1353,19 @@ i_sbc_iy:      ld   a,(de)          ; SBC ($nn),Y
 i_sbc_i:       ld   h,d
                ld   l,e
                inc  de
-i_sbc:         ex   af,af'
+i_sbc:         ex   af,af'          ; carry
                ccf                  ; uses inverted carry
+               ld   a,b
                sbc  a,(hl)          ; A-M-(1-C)
 sbc_daa:       nop
+               ld   b,a             ; set A
+               ld   c,a             ; set N Z
                ccf                  ; no carry for overflow
                exx
                jp   pe,adcsbc_v
                ld   e,%00000000
                exx
-               ex   af,af'
+               ex   af,af'          ; set carry
                jp   read_loop
 
 
@@ -1464,16 +1378,20 @@ i_and_ix:      ld   a,(de)          ; AND ($xx,X)
                inc  hl
                ld   h,(hl)
                ld   l,a
-               jp   i_and
+               ld   a,b             ; A
+               and  (hl)            ; A&x
+               ld   b,a             ; set A
+               ld   c,a             ; set N Z
+               jp   read_loop
 
 i_and_z:       ld   a,(de)          ; AND $nn
                inc  de
                ld   l,a
                ld   h,0
-               ex   af,af'          ; A
-               jr   c,and_carry
+               ld   a,b             ; A
                and  (hl)            ; A&x
-               ex   af,af'          ; set A N Z C
+               ld   b,a             ; set A
+               ld   c,a             ; set N Z
                jp   read_loop
 
 i_and_a:       ex   de,hl           ; AND $nnnn
@@ -1482,17 +1400,21 @@ i_and_a:       ex   de,hl           ; AND $nnnn
                ld   d,(hl)
                inc  hl
                ex   de,hl
-               jp   i_and
+               ld   a,b             ; A
+               and  (hl)            ; A&x
+               ld   b,a             ; set A
+               ld   c,a             ; set N Z
+               jp   read_loop
 
 i_and_zx:      ld   a,(de)          ; AND $nn,X
                inc  de
                add  a,iyh           ; add X (may wrap in zero page)
                ld   l,a
                ld   h,0
-               ex   af,af'          ; A
-               jr   c,and_carry
+               ld   a,b             ; A
                and  (hl)            ; A&x
-               ex   af,af'          ; set A N Z C
+               ld   b,a             ; set A
+               ld   c,a             ; set N Z
                jp   read_loop
 
 i_and_ay:      ld   a,(de)          ; AND $nnnn,Y
@@ -1503,7 +1425,11 @@ i_and_ay:      ld   a,(de)          ; AND $nnnn,Y
                inc  de
                adc  a,0
                ld   h,a
-               jp   i_and
+               ld   a,b             ; A
+               and  (hl)            ; A&x
+               ld   b,a             ; set A
+               ld   c,a             ; set N Z
+               jp   read_loop
 
 i_and_ax:      ld   a,(de)          ; AND $nnnn,X
                inc  de
@@ -1513,7 +1439,11 @@ i_and_ax:      ld   a,(de)          ; AND $nnnn,X
                inc  de
                adc  a,0
                ld   h,a
-               jp   i_and
+               ld   a,b             ; A
+               and  (hl)            ; A&x
+               ld   b,a             ; set A
+               ld   c,a             ; set N Z
+               jp   read_loop
 
 i_and_iy:      ld   a,(de)          ; AND ($nn),Y
                inc  de
@@ -1527,23 +1457,19 @@ i_and_iy:      ld   a,(de)          ; AND ($nn),Y
                ld   a,0
                adc  a,h
                ld   h,a
-               ex   af,af'          ; A
-               jr   c,and_carry
+               ld   a,b             ; A
                and  (hl)            ; A&x
-               ex   af,af'          ; set A N Z C
+               ld   b,a             ; set A
+               ld   c,a             ; set N Z
                jp   read_loop
 
 i_and_i:       ld   h,d
                ld   l,e
                inc  de
-i_and:         ex   af,af'          ; A
-               jr   c,and_carry
+               ld   a,b             ; A
                and  (hl)            ; A&x
-               ex   af,af'          ; set A N Z C
-               jp   read_loop
-and_carry:     and  (hl)            ; A&x
-               scf                  ; restore carry
-               ex   af,af'          ; set A+flags
+               ld   b,a             ; set A
+               ld   c,a             ; set N Z
                jp   read_loop
 
 
@@ -1556,16 +1482,20 @@ i_eor_ix:      ld   a,(de)          ; EOR ($xx,X)
                inc  hl
                ld   h,(hl)
                ld   l,a
-               jp   i_eor
+               ld   a,b             ; A
+               xor  (hl)            ; A^x
+               ld   b,a             ; set A
+               ld   c,a             ; set N Z
+               jp   read_loop
 
 i_eor_z:       ld   a,(de)          ; EOR $nn
                inc  de
                ld   l,a
                ld   h,0
-               ex   af,af'          ; A
-               jr   c,eor_carry
+               ld   a,b             ; A
                xor  (hl)            ; A^x
-               ex   af,af'          ; set A N Z C
+               ld   b,a             ; set A
+               ld   c,a             ; set N Z
                jp   read_loop
 
 i_eor_a:       ex   de,hl           ; EOR $nnnn
@@ -1574,17 +1504,21 @@ i_eor_a:       ex   de,hl           ; EOR $nnnn
                ld   d,(hl)
                inc  hl
                ex   de,hl
-               jp   i_eor
+               ld   a,b             ; A
+               xor  (hl)            ; A^x
+               ld   b,a             ; set A
+               ld   c,a             ; set N Z
+               jp   read_loop
 
 i_eor_zx:      ld   a,(de)          ; EOR $nn,X
                inc  de
                add  a,iyh           ; add X (may wrap in zero page)
                ld   l,a
                ld   h,0
-               ex   af,af'          ; A
-               jr   c,eor_carry
+               ld   a,b             ; A
                xor  (hl)            ; A^x
-               ex   af,af'          ; set A N Z C
+               ld   b,a             ; set A
+               ld   c,a             ; set N Z
                jp   read_loop
 
 i_eor_ay:      ld   a,(de)          ; EOR $nnnn,Y
@@ -1595,7 +1529,11 @@ i_eor_ay:      ld   a,(de)          ; EOR $nnnn,Y
                inc  de
                adc  a,0
                ld   h,a
-               jp   i_eor
+               ld   a,b             ; A
+               xor  (hl)            ; A^x
+               ld   b,a             ; set A
+               ld   c,a             ; set N Z
+               jp   read_loop
 
 i_eor_ax:      ld   a,(de)          ; EOR $nnnn,X
                inc  de
@@ -1605,7 +1543,11 @@ i_eor_ax:      ld   a,(de)          ; EOR $nnnn,X
                inc  de
                adc  a,0
                ld   h,a
-               jp   i_eor
+               ld   a,b             ; A
+               xor  (hl)            ; A^x
+               ld   b,a             ; set A
+               ld   c,a             ; set N Z
+               jp   read_loop
 
 i_eor_iy:      ld   a,(de)          ; EOR ($nn),Y
                inc  de
@@ -1619,23 +1561,19 @@ i_eor_iy:      ld   a,(de)          ; EOR ($nn),Y
                ld   a,0
                adc  a,h
                ld   h,a
-               ex   af,af'          ; A
-               jr   c,eor_carry
+               ld   a,b             ; A
                xor  (hl)            ; A^x
-               ex   af,af'          ; set A N Z C
+               ld   b,a             ; set A
+               ld   c,a             ; set N Z
                jp   read_loop
 
 i_eor_i:       ld   h,d
                ld   l,e
                inc  de
-i_eor:         ex   af,af'          ; A
-               jr   c,eor_carry
+               ld   a,b             ; A
                xor  (hl)            ; A^x
-               ex   af,af'          ; set A N Z C
-               jp   read_loop
-eor_carry:     xor  (hl)            ; A^x
-               scf                  ; restore carry
-               ex   af,af'          ; set A+flags
+               ld   b,a             ; set A
+               ld   c,a             ; set N Z
                jp   read_loop
 
 
@@ -1648,16 +1586,20 @@ i_ora_ix:      ld   a,(de)          ; ORA ($xx,X)
                inc  hl
                ld   h,(hl)
                ld   l,a
-               jp   i_ora
+               ld   a,b             ; A
+               or   (hl)            ; A|x
+               ld   b,a             ; set A
+               ld   c,a             ; set N Z
+               jp   read_loop
 
 i_ora_z:       ld   a,(de)          ; ORA $nn
                inc  de
                ld   l,a
                ld   h,0
-               ex   af,af'          ; A
-               jr   c,ora_carry
+               ld   a,b             ; A
                or   (hl)            ; A|x
-               ex   af,af'          ; set A N Z C
+               ld   b,a             ; set A
+               ld   c,a             ; set N Z
                jp   read_loop
 
 i_ora_a:       ex   de,hl           ; ORA $nnnn
@@ -1666,17 +1608,21 @@ i_ora_a:       ex   de,hl           ; ORA $nnnn
                ld   d,(hl)
                inc  hl
                ex   de,hl
-               jp   i_ora
+               ld   a,b             ; A
+               or   (hl)            ; A|x
+               ld   b,a             ; set A
+               ld   c,a             ; set N Z
+               jp   read_loop
 
 i_ora_zx:      ld   a,(de)          ; ORA $nn,X
                inc  de
                add  a,iyh           ; add X (may wrap in zero page)
                ld   l,a
                ld   h,0
-               ex   af,af'          ; A
-               jr   c,ora_carry
+               ld   a,b             ; A
                or   (hl)            ; A|x
-               ex   af,af'          ; set A N Z C
+               ld   b,a             ; set A
+               ld   c,a             ; set N Z
                jp   read_loop
 
 i_ora_ay:      ld   a,(de)          ; ORA $nnnn,Y
@@ -1687,7 +1633,11 @@ i_ora_ay:      ld   a,(de)          ; ORA $nnnn,Y
                inc  de
                adc  a,0
                ld   h,a
-               jp   i_ora
+               ld   a,b             ; A
+               or   (hl)            ; A|x
+               ld   b,a             ; set A
+               ld   c,a             ; set N Z
+               jp   read_loop
 
 i_ora_ax:      ld   a,(de)          ; ORA $nnnn,X
                inc  de
@@ -1697,7 +1647,11 @@ i_ora_ax:      ld   a,(de)          ; ORA $nnnn,X
                inc  de
                adc  a,0
                ld   h,a
-               jp   i_ora
+               ld   a,b             ; A
+               or   (hl)            ; A|x
+               ld   b,a             ; set A
+               ld   c,a             ; set N Z
+               jp   read_loop
 
 i_ora_iy:      ld   a,(de)          ; ORA ($nn),Y
                inc  de
@@ -1711,23 +1665,19 @@ i_ora_iy:      ld   a,(de)          ; ORA ($nn),Y
                ld   a,0
                adc  a,h
                ld   h,a
-               ex   af,af'          ; A
-               jr   c,ora_carry
+               ld   a,b             ; A
                or   (hl)            ; A|x
-               ex   af,af'          ; set A N Z C
+               ld   b,a             ; set A
+               ld   c,a             ; set N Z
                jp   read_loop
 
 i_ora_i:       ld   h,d
                ld   l,e
                inc  de
-i_ora:         ex   af,af'          ; A
-               jr   c,ora_carry
+               ld   a,b             ; A
                or   (hl)            ; A|x
-               ex   af,af'          ; set A N Z C
-               jp   read_loop
-ora_carry:     or   (hl)            ; A|x
-               scf                  ; restore carry
-               ex   af,af'          ; set A+flags
+               ld   b,a             ; set A
+               ld   c,a             ; set N Z
                jp   read_loop
 
 
@@ -1740,16 +1690,24 @@ i_cmp_ix:      ld   a,(de)          ; CMP ($xx,X)
                inc  hl
                ld   h,(hl)
                ld   l,a
-               jp   i_cmp
+               ex   af,af'          ; carry
+               ld   a,b             ; A
+               sub  (hl)            ; A-x (result discarded)
+               ld   c,a             ; set N Z
+               ccf
+               ex   af,af'          ; set carry
+               jp   read_loop
 
 i_cmp_z:       ld   a,(de)          ; CMP $nn
                inc  de
                ld   l,a
                ld   h,0
-               ex   af,af'          ; A
-               cp   (hl)            ; A-x (result discarded)
+               ex   af,af'          ; carry
+               ld   a,b             ; A
+               sub  (hl)            ; A-x (result discarded)
+               ld   c,a             ; set N Z
                ccf
-               ex   af,af'          ; set A+flags
+               ex   af,af'          ; set carry
                jp   read_loop
 
 i_cmp_a:       ex   de,hl           ; CMP $nnnn
@@ -1758,17 +1716,25 @@ i_cmp_a:       ex   de,hl           ; CMP $nnnn
                ld   d,(hl)
                inc  hl
                ex   de,hl
-               jp   i_cmp
+               ex   af,af'          ; carry
+               ld   a,b             ; A
+               sub  (hl)            ; A-x (result discarded)
+               ld   c,a             ; set N Z
+               ccf
+               ex   af,af'          ; set carry
+               jp   read_loop
 
 i_cmp_zx:      ld   a,(de)          ; CMP $nn,X
                inc  de
                add  a,iyh           ; add X (may wrap in zero page)
                ld   l,a
                ld   h,0
-               ex   af,af'          ; A
-               cp   (hl)            ; A-x (result discarded)
+               ex   af,af'          ; carry
+               ld   a,b             ; A
+               sub  (hl)            ; A-x (result discarded)
+               ld   c,a             ; set N Z
                ccf
-               ex   af,af'          ; set A+flags
+               ex   af,af'          ; set carry
                jp   read_loop
 
 i_cmp_ay:      ld   a,(de)          ; CMP $nnnn,Y
@@ -1779,7 +1745,13 @@ i_cmp_ay:      ld   a,(de)          ; CMP $nnnn,Y
                inc  de
                adc  a,0
                ld   h,a
-               jp   i_cmp
+               ex   af,af'          ; carry
+               ld   a,b             ; A
+               sub  (hl)            ; A-x (result discarded)
+               ld   c,a             ; set N Z
+               ccf
+               ex   af,af'          ; set carry
+               jp   read_loop
 
 i_cmp_ax:      ld   a,(de)          ; CMP $nnnn,X
                inc  de
@@ -1789,7 +1761,13 @@ i_cmp_ax:      ld   a,(de)          ; CMP $nnnn,X
                inc  de
                adc  a,0
                ld   h,a
-               jp   i_cmp
+               ex   af,af'          ; carry
+               ld   a,b             ; A
+               sub  (hl)            ; A-x (result discarded)
+               ld   c,a             ; set N Z
+               ccf
+               ex   af,af'          ; set carry
+               jp   read_loop
 
 i_cmp_iy:      ld   a,(de)          ; CMP ($nn),Y
                inc  de
@@ -1803,19 +1781,23 @@ i_cmp_iy:      ld   a,(de)          ; CMP ($nn),Y
                ld   a,0
                adc  a,h
                ld   h,a
-               ex   af,af'          ; A
-               cp   (hl)            ; A-x (result discarded)
+               ex   af,af'          ; carry
+               ld   a,b             ; A
+               sub  (hl)            ; A-x (result discarded)
+               ld   c,a             ; set N Z
                ccf
-               ex   af,af'          ; set A+flags
+               ex   af,af'          ; set carry
                jp   read_loop
 
 i_cmp_i:       ld   h,d
                ld   l,e
                inc  de
-i_cmp:         ex   af,af'          ; A
-               cp   (hl)            ; A-x (result discarded)
+               ex   af,af'          ; carry
+               ld   a,b             ; A
+               sub  (hl)            ; A-x (result discarded)
+               ld   c,a             ; set N Z
                ccf
-               ex   af,af'          ; set A+flags
+               ex   af,af'          ; set carry
                jp   read_loop
 
 
@@ -1823,13 +1805,12 @@ i_cpx_z:       ld   a,(de)          ; CPX $nn
                inc  de
                ld   l,a
                ld   h,0
-               ex   af,af'
-               ld   b,a
+               ex   af,af'          ; carry
                ld   a,iyh           ; X
-               cp   (hl)            ; X-x (result discarded)
+               sub  (hl)            ; X-x (result discarded)
+               ld   c,a             ; set N Z
                ccf
-               ld   a,b
-               ex   af,af'          ; set N Z C
+               ex   af,af'          ; set carry
                jp   read_loop
 
 i_cpx_a:       ex   de,hl           ; CPX $nnnn
@@ -1838,18 +1819,23 @@ i_cpx_a:       ex   de,hl           ; CPX $nnnn
                ld   d,(hl)
                inc  hl
                ex   de,hl
-               jp   i_cpx
+               ex   af,af'          ; carry
+               ld   a,iyh           ; X
+               sub  (hl)            ; X-x (result discarded)
+               ld   c,a             ; set N Z
+               ccf
+               ex   af,af'          ; set carry
+               jp   read_loop
 
 i_cpx_i:       ld   h,d
                ld   l,e
                inc  de
-i_cpx:         ex   af,af'
-               ld   b,a
+               ex   af,af'          ; carry
                ld   a,iyh           ; X
-               cp   (hl)            ; X-x (result discarded)
+               sub  (hl)            ; X-x (result discarded)
+               ld   c,a             ; set N Z
                ccf
-               ld   a,b
-               ex   af,af'          ; set N Z C
+               ex   af,af'          ; set carry
                jp   read_loop
 
 
@@ -1857,13 +1843,12 @@ i_cpy_z:       ld   a,(de)          ; CPY $nn
                inc  de
                ld   l,a
                ld   h,0
-               ex   af,af'
-               ld   b,a
+               ex   af,af'          ; carry
                ld   a,iyl           ; Y
-               cp   (hl)            ; Y-x (result discarded)
+               sub  (hl)            ; Y-x (result discarded)
+               ld   c,a             ; set N Z
                ccf
-               ld   a,b
-               ex   af,af'          ; set N Z C
+               ex   af,af'          ; set carry
                jp   read_loop
 
 i_cpy_a:       ex   de,hl           ; CPY $nnnn
@@ -1872,18 +1857,23 @@ i_cpy_a:       ex   de,hl           ; CPY $nnnn
                ld   d,(hl)
                inc  hl
                ex   de,hl
-               jp   i_cpy
+               ex   af,af'          ; carry
+               ld   a,iyl           ; Y
+               sub  (hl)            ; Y-x (result discarded)
+               ld   c,a             ; set N Z
+               ccf
+               ex   af,af'          ; set carry
+               jp   read_loop
 
 i_cpy_i:       ld   h,d
                ld   l,e
                inc  de
-i_cpy:         ex   af,af'
-               ld   b,a
+               ex   af,af'          ; carry
                ld   a,iyl           ; Y
-               cp   (hl)            ; Y-x (result discarded)
+               sub  (hl)            ; Y-x (result discarded)
+               ld   c,a             ; set N Z
                ccf
-               ld   a,b
-               ex   af,af'          ; set N Z C
+               ex   af,af'          ; set carry
                jp   read_loop
 
 
@@ -1891,9 +1881,8 @@ i_dec_z:       ld   a,(de)          ; DEC $nn
                inc  de
                ld   l,a
                ld   h,0
-               ex   af,af'
                dec  (hl)            ; zero-page--
-               ex   af,af'          ; set N Z
+               ld   c,(hl)          ; set N Z
                jp   zread_write_loop
 
 i_dec_zx:      ld   a,(de)          ; DEC $nn,X
@@ -1901,9 +1890,8 @@ i_dec_zx:      ld   a,(de)          ; DEC $nn,X
                add  a,iyh           ; add X (may wrap in zero page)
                ld   l,a
                ld   h,0
-               ex   af,af'
                dec  (hl)            ; zero-page--
-               ex   af,af'          ; set N Z
+               ld   c,(hl)          ; set N Z
                jp   zread_write_loop
 
 i_dec_a:       ex   de,hl           ; DEC $nnnn
@@ -1912,9 +1900,8 @@ i_dec_a:       ex   de,hl           ; DEC $nnnn
                ld   d,(hl)
                inc  hl
                ex   de,hl
-               ex   af,af'
                dec  (hl)            ; mem--
-               ex   af,af'          ; set N Z
+               ld   c,(hl)          ; set N Z
                jp   read_write_loop
 
 i_dec_ax:      ld   a,(de)          ; DEC $nnnn,X
@@ -1925,9 +1912,8 @@ i_dec_ax:      ld   a,(de)          ; DEC $nnnn,X
                inc  de
                adc  a,0
                ld   h,a
-               ex   af,af'
                dec  (hl)            ; mem--
-               ex   af,af'          ; set N Z
+               ld   c,(hl)          ; set N Z
                jp   read_write_loop
 
 
@@ -1935,9 +1921,8 @@ i_inc_z:       ld   a,(de)          ; INC $nn
                inc  de
                ld   l,a
                ld   h,0
-               ex   af,af'
                inc  (hl)            ; zero-page++
-               ex   af,af'          ; set N Z
+               ld   c,(hl)          ; set N Z
                jp   zread_write_loop
 
 i_inc_zx:      ld   a,(de)          ; INC $nn,X
@@ -1945,9 +1930,8 @@ i_inc_zx:      ld   a,(de)          ; INC $nn,X
                add  a,iyh           ; add X (may wrap in zero page)
                ld   l,a
                ld   h,0
-               ex   af,af'
                inc  (hl)            ; zero-page++
-               ex   af,af'          ; set N Z
+               ld   c,(hl)          ; set N Z
                jp   zread_write_loop
 
 i_inc_a:       ex   de,hl           ; INC $nnnn
@@ -1956,9 +1940,8 @@ i_inc_a:       ex   de,hl           ; INC $nnnn
                ld   d,(hl)
                inc  hl
                ex   de,hl
-               ex   af,af'
                inc  (hl)            ; mem++
-               ex   af,af'          ; set N Z
+               ld   c,(hl)          ; set N Z
                jp   read_write_loop
 
 i_inc_ax:      ld   a,(de)          ; INC $nnnn,X
@@ -1969,9 +1952,8 @@ i_inc_ax:      ld   a,(de)          ; INC $nnnn,X
                inc  de
                adc  a,0
                ld   h,a
-               ex   af,af'
                inc  (hl)            ; mem++
-               ex   af,af'          ; set N Z
+               ld   c,(hl)          ; set N Z
                jp   read_write_loop
 
 
@@ -1979,9 +1961,10 @@ i_asl_z:       ld   a,(de)          ; ASL $nn
                inc  de
                ld   l,a
                ld   h,0
-i_asl:         ex   af,af'
+               ex   af,af'
                sla  (hl)            ; x << 1
-               ex   af,af'          ; set N Z C
+               ld   c,(hl)          ; set N Z
+               ex   af,af'          ; set carry
                jp   write_loop
 
 i_asl_zx:      ld   a,(de)          ; ASL $nn,X
@@ -1991,7 +1974,8 @@ i_asl_zx:      ld   a,(de)          ; ASL $nn,X
                ld   h,0
                ex   af,af'
                sla  (hl)            ; x << 1
-               ex   af,af'          ; set N Z C
+               ld   c,(hl)          ; set N Z
+               ex   af,af'          ; set carry
                jp   write_loop
 
 i_asl_a:       ex   de,hl           ; ASL $nnnn
@@ -2000,7 +1984,11 @@ i_asl_a:       ex   de,hl           ; ASL $nnnn
                ld   d,(hl)
                inc  hl
                ex   de,hl
-               jp   i_asl
+               ex   af,af'
+               sla  (hl)            ; x << 1
+               ld   c,(hl)          ; set N Z
+               ex   af,af'          ; set carry
+               jp   write_loop
 
 i_asl_ax:      ld   a,(de)          ; ASL $nnnn,X
                inc  de
@@ -2010,11 +1998,16 @@ i_asl_ax:      ld   a,(de)          ; ASL $nnnn,X
                inc  de
                adc  a,0
                ld   h,a
-               jp   i_asl
+               ex   af,af'
+               sla  (hl)            ; x << 1
+               ld   c,(hl)          ; set N Z
+               ex   af,af'          ; set carry
+               jp   write_loop
 
 i_asl_acc:     ex   af,af'
-               sla  a               ; A << 1
-               ex   af,af'          ; set N Z C
+               sla  b               ; A << 1
+               ld   c,b             ; set N Z
+               ex   af,af'          ; set carry
                jp   (ix)
 
 
@@ -2022,9 +2015,10 @@ i_lsr_z:       ld   a,(de)          ; LSR $nn
                inc  de
                ld   l,a
                ld   h,0
-i_lsr:         ex   af,af'
+               ex   af,af'
                srl  (hl)            ; x >> 1
-               ex   af,af'          ; set N Z C
+               ld   c,(hl)          ; set N Z
+               ex   af,af'          ; set carry
                jp   write_loop
 
 i_lsr_zx:      ld   a,(de)          ; LSR $nn,X
@@ -2034,7 +2028,8 @@ i_lsr_zx:      ld   a,(de)          ; LSR $nn,X
                ld   h,0
                ex   af,af'
                srl  (hl)            ; x >> 1
-               ex   af,af'          ; set N Z C
+               ld   c,(hl)          ; set N Z
+               ex   af,af'          ; set carry
                jp   write_loop
 
 i_lsr_a:       ex   de,hl           ; LSR $nnnn
@@ -2043,7 +2038,11 @@ i_lsr_a:       ex   de,hl           ; LSR $nnnn
                ld   d,(hl)
                inc  hl
                ex   de,hl
-               jp   i_lsr
+               ex   af,af'
+               srl  (hl)            ; x >> 1
+               ld   c,(hl)          ; set N Z
+               ex   af,af'          ; set carry
+               jp   write_loop
 
 i_lsr_ax:      ld   a,(de)          ; LSR $nnnn,X
                inc  de
@@ -2053,11 +2052,16 @@ i_lsr_ax:      ld   a,(de)          ; LSR $nnnn,X
                inc  de
                adc  a,0
                ld   h,a
-               jp   i_lsr
+               ex   af,af'
+               srl  (hl)            ; x >> 1
+               ld   c,(hl)          ; set N Z
+               ex   af,af'          ; set carry
+               jp   write_loop
 
 i_lsr_acc:     ex   af,af'
-               srl  a               ; A >> 1
-               ex   af,af'          ; set N Z C
+               srl  b               ; A >> 1
+               ld   c,b             ; set N Z
+               ex   af,af'          ; set carry
                jp   (ix)
 
 
@@ -2065,9 +2069,10 @@ i_rol_z:       ld   a,(de)          ; ROL $nn
                inc  de
                ld   l,a
                ld   h,0
-i_rol:         ex   af,af'
+               ex   af,af'
                rl   (hl)            ; x << 1
-               ex   af,af'          ; set N Z C
+               ld   c,(hl)          ; set N Z
+               ex   af,af'          ; set carry
                jp   write_loop
 
 i_rol_zx:      ld   a,(de)          ; ROL $nn,X
@@ -2077,7 +2082,8 @@ i_rol_zx:      ld   a,(de)          ; ROL $nn,X
                ld   h,0
                ex   af,af'
                rl   (hl)            ; x << 1
-               ex   af,af'          ; set N Z C
+               ld   c,(hl)          ; set N Z
+               ex   af,af'          ; set carry
                jp   write_loop
 
 i_rol_a:       ex   de,hl           ; ROL $nnnn
@@ -2086,7 +2092,11 @@ i_rol_a:       ex   de,hl           ; ROL $nnnn
                ld   d,(hl)
                inc  hl
                ex   de,hl
-               jp   i_rol
+               ex   af,af'
+               rl   (hl)            ; x << 1
+               ld   c,(hl)          ; set N Z
+               ex   af,af'          ; set carry
+               jp   write_loop
 
 i_rol_ax:      ld   a,(de)          ; ROL $nnnn,X
                inc  de
@@ -2096,11 +2106,16 @@ i_rol_ax:      ld   a,(de)          ; ROL $nnnn,X
                inc  de
                adc  a,0
                ld   h,a
-               jp   i_rol
+               ex   af,af'
+               rl   (hl)            ; x << 1
+               ld   c,(hl)          ; set N Z
+               ex   af,af'          ; set carry
+               jp   write_loop
 
 i_rol_acc:     ex   af,af'
-               rla
-               ex   af,af'          ; set N Z C
+               rl   b
+               ld   c,b             ; set N Z
+               ex   af,af'          ; set carry
                jp   (ix)
 
 
@@ -2108,9 +2123,10 @@ i_ror_z:       ld   a,(de)          ; ROR $nn
                inc  de
                ld   l,a
                ld   h,0
-i_ror:         ex   af,af'
+               ex   af,af'
                rr   (hl)            ; x >> 1
-               ex   af,af'          ; set N Z C
+               ld   c,(hl)          ; set N Z
+               ex   af,af'          ; set carry
                jp   write_loop
 
 i_ror_zx:      ld   a,(de)          ; ROR $nn,X
@@ -2120,7 +2136,8 @@ i_ror_zx:      ld   a,(de)          ; ROR $nn,X
                ld   h,0
                ex   af,af'
                rr   (hl)            ; x >> 1
-               ex   af,af'          ; set N Z C
+               ld   c,(hl)          ; set N Z
+               ex   af,af'          ; set carry
                jp   write_loop
 
 i_ror_a:       ex   de,hl           ; ROR $nnnn
@@ -2129,7 +2146,11 @@ i_ror_a:       ex   de,hl           ; ROR $nnnn
                ld   d,(hl)
                inc  hl
                ex   de,hl
-               jp   i_ror
+               ex   af,af'
+               rr   (hl)            ; x >> 1
+               ld   c,(hl)          ; set N Z
+               ex   af,af'          ; set carry
+               jp   write_loop
 
 i_ror_ax:      ld   a,(de)          ; ROR $nnnn,X
                inc  de
@@ -2139,11 +2160,16 @@ i_ror_ax:      ld   a,(de)          ; ROR $nnnn,X
                inc  de
                adc  a,0
                ld   h,a
-               jp   i_ror
+               ex   af,af'
+               rr   (hl)            ; x >> 1
+               ld   c,(hl)          ; set N Z
+               ex   af,af'          ; set carry
+               jp   write_loop
 
 i_ror_acc:     ex   af,af'
-               rra                  ; A >> 1
-               ex   af,af'          ; set N Z C
+               rr   b
+               ld   c,b             ; set N Z
+               ex   af,af'          ; set carry
                jp   (ix)
 
 
@@ -2183,21 +2209,19 @@ i_bit_i:       ld   h,d             ; BIT #$nn
                inc  de
 i_bit:         ld   c,(hl)          ; x
                ld   a,c
-               exx
                and  %01000000       ; V flag from bit 6 of x
+               exx
                ld   e,a             ; set V
                exx
-               ex   af,af'          ; A+flags
-               inc  c
-               dec  c               ; set N from x
-               push af
+               ld   a,(de)
+               and  %11011111
+               cp   &d0             ; BNE or BEQ next?
+               jr   z,bit_setz
+               ld   c,(hl)          ; set N
+               jp   read_loop
+bit_setz:      ld   a,b             ; A
                and  c               ; perform BIT test
-               jr   nz,bit_nonzero
-               pop  bc
-               set  6,c             ; set Z flag
-               push bc
-bit_nonzero:   pop  af
-               ex   af,af'
+               ld   c,a             ; set Z
                jp   read_loop
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
