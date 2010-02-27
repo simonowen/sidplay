@@ -1,4 +1,4 @@
-; SID Player v1.2, by Simon Owen
+; SID Player v1.3, by Simon Owen
 ;
 ; WWW: http://simonowen.com/sam/sidplay/
 ;
@@ -46,7 +46,6 @@ ret_esc:       equ  5               ; esc
 ret_badfile:   equ  6               ; missing or invalid file
 ret_rsid:      equ  7               ; RSID files unsupported
 ret_timer:     equ  8               ; unsupported timer frequency
-ret_brk:       equ  9               ; BRK unsupported
 
 m6502_nmi:     equ  &fffa           ; nmi vector address
 m6502_reset:   equ  &fffc           ; reset vector address
@@ -539,6 +538,7 @@ i_jsr:         ex   de,hl           ; JSR nn
                exx
                jp   (ix)
 
+i_brk: ; fall through
 i_rts:         exx                  ; RTS
                inc  l               ; S++
                ld   a,ret_ok
@@ -608,9 +608,6 @@ i_sed:         exx
                ld   (sbc_daa),a     ; use decimal mode for sbc
                jp   (ix)
 
-
-i_brk:         ld   a,ret_brk
-               ret
 
 i_rti:         exx
                inc  l               ; S++
