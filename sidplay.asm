@@ -1,9 +1,9 @@
-; SID Player v1.3, by Simon Owen
+; SID Player v1.4, by Simon Owen
 ;
 ; WWW: http://simonowen.com/sam/sidplay/
 ;
 ; Emulates a 6510 CPU to play most C64 SID tunes in real time.
-; Requires Quazar SID interface board (see www.quazar.clara.net)
+; Requires SID interface board from Quazar or Velesoft
 ;
 ; Load PSID file at &10000 and call &d000 to play
 ; POKE &d002,tune-number (default=0, for SID default)
@@ -22,6 +22,8 @@ base:          equ  &d000           ; Player based at 53248
 
 buffer_blocks: equ  25              ; number of frames to pre-buffer
 buffer_low:    equ  10              ; low limit before screen disable
+
+sam_sid_port:  equ  &d4             ; base port for SAM SID interface
 
 status:        equ  249             ; Status port for active interrupts (input)
 line:          equ  249             ; Line interrupt (output)
@@ -54,6 +56,7 @@ m6502_int:     equ  &fffe           ; int vector address (also for BRK)
 c64_irq_vec:   equ  &0314           ; C64 IRQ vector
 c64_irq_cont:  equ  &ea31           ; C64 ROM IRQ chaining
 c64_cia_timer: equ  &dc04           ; C64 CIA#1 timer
+c64_sid_base:  equ  &d400           ; C64 SID chip
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -338,7 +341,7 @@ execute:       ex   de,hl           ; PC stays in DE throughout
 
 read_write_loop:
 write_loop:    ld   a,h
-               cp   &d4             ; SID based at &d400
+               cp   c64_sid_base/256 ; SID write to &d4xx?
                jr   z,sid_write
 
 main_loop:     ld   a,(de)          ; fetch opcode
@@ -600,7 +603,7 @@ i_cld:         exx                  ; clear decimal mode
                ld   (sbc_daa),a     ; use binary mode for sbc
                jp   (ix)
 
-i_sed:         exx
+i_sed:         exx                  ; set decimal mode
                set  3,d
                exx
                ld   a,&27           ; DAA
@@ -2131,7 +2134,7 @@ gap3:          equ  &dc00-$        ; error if previous code is
 ; SID interface functions
 
 sid_reset:     ld   hl,last_regs
-               ld   bc,&00d4       ; SID base port is &D4
+               ld   bc,sam_sid_port
                ld   d,b            ; write 0 to all registers
                ld   a,25           ; 25 registers to write
 reset_loop:    out  (c),d          ; write to register
@@ -2151,7 +2154,7 @@ reset_loop:    out  (c),d          ; write to register
                ret
 
 sid_update:    ex   de,hl          ; switch new values to DE
-               ld   c,&d4          ; SID interface base port
+               ld   c,sam_sid_port ; SID interface base port
 
                ld   hl,25          ; control 1 changes offset
                add  hl,de
@@ -2307,13 +2310,13 @@ record_block:  ld   de,(head)
                ld   a,buffer_page+rom0_off
                out  (lmpr),a
                ldir
-               xor  a
                ld   l,&24           ; changes for control 1
                ldi
                ld   l,&2b           ; changes for control 2
                ldi
                ld   l,&32           ; changes for control 3
                ldi
+               xor  a
                ld   l,&24
                ld   (hl),a          ; clear control changes 1
                ld   l,&2b
