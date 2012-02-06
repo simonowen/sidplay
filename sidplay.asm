@@ -2507,6 +2507,4 @@ end:           equ  $
 size:          equ  end-base
 
 ; For testing we include a sample tune (not supplied)
-IF defined (TEST)
-INCLUDE "tune.asm"
-ENDIF
+;MDAT "tunes\Thing_Bounces_Back.sid"

@@ -1,5 +1,5 @@
-SID Player v1.4
----------------
+SID Player (v1.4)
+-----------------
 
 Version 1.4 (2011/07/16)
 - Allow easier changing of SID interface base port
@@ -21,6 +21,7 @@ Version 1.1 (2007/06/07)
 Version 1.0 (2004/12/07)
 - initial release
 
+---
 
-Written by Simon Owen
+Simon Owen
 http://simonowen.com/sam/sidplay/
