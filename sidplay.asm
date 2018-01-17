@@ -797,8 +797,8 @@ i_lda_iy:      ld   a,(de)          ; LDA ($nn),Y
                inc  l               ; (may wrap in zero page)
                ld   h,(hl)
                ld   l,a
-               ld   a,0
                adc  a,h
+               sub  l
                ld   h,a
                ld   b,(hl)          ; set A
                ld   c,b             ; set N Z
@@ -964,8 +964,8 @@ i_sta_iy:      ld   a,(de)          ; STA ($nn),Y
                inc  l
                ld   h,(hl)
                ld   l,a
-               ld   a,0
                adc  a,h
+               sub  l
                ld   h,a
                ld   (hl),b          ; store A
                jp   write_loop
@@ -1156,8 +1156,8 @@ i_adc_iy:      ld   a,(de)          ; ADC ($nn),Y
                inc  l               ; (may wrap in zero page)
                ld   h,(hl)
                ld   l,a
-               ld   a,0
                adc  a,h
+               sub  l
                ld   h,a
                jp   i_adc
 
@@ -1243,8 +1243,8 @@ i_sbc_iy:      ld   a,(de)          ; SBC ($nn),Y
                inc  l               ; (may wrap in zero page)
                ld   h,(hl)
                ld   l,a
-               ld   a,0
                adc  a,h
+               sub  l
                ld   h,a
                jp   i_sbc
 
@@ -1352,8 +1352,8 @@ i_and_iy:      ld   a,(de)          ; AND ($nn),Y
                inc  l               ; (may wrap in zero page)
                ld   h,(hl)
                ld   l,a
-               ld   a,0
                adc  a,h
+               sub  l
                ld   h,a
                ld   a,b             ; A
                and  (hl)            ; A&x
@@ -1456,8 +1456,8 @@ i_eor_iy:      ld   a,(de)          ; EOR ($nn),Y
                inc  l               ; (may wrap in zero page)
                ld   h,(hl)
                ld   l,a
-               ld   a,0
                adc  a,h
+               sub  l
                ld   h,a
                ld   a,b             ; A
                xor  (hl)            ; A^x
@@ -1560,8 +1560,8 @@ i_ora_iy:      ld   a,(de)          ; ORA ($nn),Y
                inc  l               ; (may wrap in zero page)
                ld   h,(hl)
                ld   l,a
-               ld   a,0
                adc  a,h
+               sub  l
                ld   h,a
                ld   a,b             ; A
                or   (hl)            ; A|x
@@ -1676,8 +1676,8 @@ i_cmp_iy:      ld   a,(de)          ; CMP ($nn),Y
                inc  l               ; (may wrap in zero page)
                ld   h,(hl)
                ld   l,a
-               ld   a,0
                adc  a,h
+               sub  l
                ld   h,a
                ex   af,af'          ; carry
                ld   a,b             ; A
