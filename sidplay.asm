@@ -2507,4 +2507,5 @@ end:           equ  $
 size:          equ  end-base
 
 ; For testing we include a sample tune (not supplied)
+;DUMP 3,0
 ;MDAT "tunes\Thing_Bounces_Back.sid"
