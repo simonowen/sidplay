@@ -25,6 +25,9 @@ buffer_low:    equ  10              ; low limit before screen disable
 
 sam_sid_port:  equ  &d4             ; base port for SAM SID interface
 
+zero_page_msb: equ  &00             ; 6502 zero page base MSB
+stack_msb:     equ  &01             ; 6502 stack base MSB
+
 status:        equ  249             ; Status port for active interrupts (input)
 line:          equ  249             ; Line interrupt (output)
 lmpr:          equ  250             ; Low Memory Page Register
@@ -153,9 +156,10 @@ got_load:
                ld   bc,&d000
                lddr                 ; relocate 0000-cfff
 no_reloc:
-               ld   h,0
-               ld   l,h
-clear_zp:      ld   (hl),h
+               xor  a
+               ld   h,zero_page_msb
+               ld   l,a
+clear_zp:      ld   (hl),a
                inc  l
                jr   nz,clear_zp
 
@@ -334,7 +338,8 @@ execute:       ex   de,hl           ; PC stays in DE throughout
                ex   af,af'
 
                exx
-               ld   hl,&01ff        ; 6502 stack pointer in HL'
+               ld   h,stack_msb     ; 6502 stack pointer in HL'
+               ld   l,&ff           ; top of stack
                ld   d,%00000100     ; interrupts disabled
                ld   e,0             ; clear V
                exx
@@ -761,7 +766,7 @@ i_lda_ix:      ld   a,(de)          ; LDA ($nn,X)
                inc  de
                add  a,iyh           ; add X (may wrap in zero page)
                ld   l,a
-               ld   h,0
+               ld   h,zero_page_msb
                ld   a,(hl)
                inc  hl
                ld   h,(hl)
@@ -773,7 +778,7 @@ i_lda_ix:      ld   a,(de)          ; LDA ($nn,X)
 i_lda_z:       ld   a,(de)          ; LDA $nn
                inc  de
                ld   l,a
-               ld   h,0
+               ld   h,zero_page_msb
                ld   b,(hl)          ; set A
                ld   c,b             ; set N Z
                jp   (ix) ; zread_loop
@@ -791,7 +796,7 @@ i_lda_a:       ex   de,hl           ; LDA $nnnn
 i_lda_iy:      ld   a,(de)          ; LDA ($nn),Y
                inc  de
                ld   l,a
-               ld   h,0
+               ld   h,zero_page_msb
                ld   a,iyl           ; Y
                add  a,(hl)
                inc  l               ; (may wrap in zero page)
@@ -808,7 +813,7 @@ i_lda_zx:      ld   a,(de)          ; LDA $nn,X
                inc  de
                add  a,iyh           ; add X (may wrap in zero page)
                ld   l,a
-               ld   h,0
+               ld   h,zero_page_msb
                ld   b,(hl)          ; set A
                ld   c,b             ; set N Z
                jp   (ix) ; zread_loop
@@ -847,7 +852,7 @@ i_lda_i:       ld   a,(de)          ; LDA #$nn
 i_ldx_z:       ld   a,(de)          ; LDX $nn
                inc  de
                ld   l,a
-               ld   h,0
+               ld   h,zero_page_msb
                ld   c,(hl)          ; set N Z
                ld   iyh,c           ; set X
                jp   (ix) ; zread_loop
@@ -866,7 +871,7 @@ i_ldx_zy:      ld   a,(de)          ; LDX $nn,Y
                inc  de
                add  a,iyl           ; add Y (may wrap in zero page)
                ld   l,a
-               ld   h,0
+               ld   h,zero_page_msb
                ld   c,(hl)          ; set N Z
                ld   iyh,c           ; set X
                jp   (ix) ; zread_loop
@@ -893,7 +898,7 @@ i_ldx_i:       ld   a,(de)          ; LDX #$nn
 i_ldy_z:       ld   a,(de)          ; LDY $nn
                inc  de
                ld   l,a
-               ld   h,0
+               ld   h,zero_page_msb
                ld   c,(hl)          ; set N Z
                ld   iyl,c           ; set Y
                jp   (ix) ; zread_loop
@@ -912,7 +917,7 @@ i_ldy_zx:      ld   a,(de)          ; LDY $nn,X
                inc  de
                add  a,iyh           ; add X (may wrap in zero page)
                ld   l,a
-               ld   h,0
+               ld   h,zero_page_msb
                ld   c,(hl)          ; set N Z
                ld   iyl,c           ; set Y
                jp   (ix) ; zread_loop
@@ -940,7 +945,7 @@ i_sta_ix:      ld   a,(de)          ; STA ($xx,X)
                inc  de
                add  a,iyh           ; add X (may wrap in zero page)
                ld   l,a
-               ld   h,0
+               ld   h,zero_page_msb
                ld   a,(hl)
                inc  hl
                ld   h,(hl)
@@ -951,14 +956,14 @@ i_sta_ix:      ld   a,(de)          ; STA ($xx,X)
 i_sta_z:       ld   a,(de)          ; STA $nn
                inc  de
                ld   l,a
-               ld   h,0
+               ld   h,zero_page_msb
                ld   (hl),b          ; store A
                jp   (ix) ; zwrite_loop
 
 i_sta_iy:      ld   a,(de)          ; STA ($nn),Y
                inc  de
                ld   l,a
-               ld   h,0
+               ld   h,zero_page_msb
                ld   a,iyl           ; Y
                add  a,(hl)
                inc  l
@@ -974,7 +979,7 @@ i_sta_zx:      ld   a,(de)          ; STA $nn,X
                inc  de
                add  a,iyh           ; add X (may wrap in zero page)
                ld   l,a
-               ld   h,0
+               ld   h,zero_page_msb
                ld   (hl),b          ; store A
                jp   (ix) ; zwrite_loop
 
@@ -1013,7 +1018,7 @@ i_sta_a:       ex   de,hl           ; STA $nnnn
 i_stx_z:       ld   a,(de)          ; STX $nn
                inc  de
                ld   l,a
-               ld   h,0
+               ld   h,zero_page_msb
                ld   a,iyh           ; X
                ld   (hl),a
                jp   (ix) ; zwrite_loop
@@ -1022,7 +1027,7 @@ i_stx_zy:      ld   a,(de)          ; STX $nn,Y
                inc  de
                add  a,iyl           ; add Y (may wrap in zero page)
                ld   l,a
-               ld   h,0
+               ld   h,zero_page_msb
                ld   a,iyh           ; X
                ld   (hl),a
                jp   (ix) ; zwrite_loop
@@ -1041,7 +1046,7 @@ i_stx_a:       ex   de,hl           ; STX $nnnn
 i_sty_z:       ld   a,(de)          ; STY $nn
                inc  de
                ld   l,a
-               ld   h,0
+               ld   h,zero_page_msb
                ld   a,iyl           ; Y
                ld   (hl),a
                jp   (ix) ; zwrite_loop
@@ -1050,7 +1055,7 @@ i_sty_zx:      ld   a,(de)          ; STY $nn,X
                inc  de
                add  a,iyh           ; add X (may wrap in zero page)
                ld   l,a
-               ld   h,0
+               ld   h,zero_page_msb
                ld   a,iyl           ; Y
                ld   (hl),a
                jp   (ix) ; zwrite_loop
@@ -1070,7 +1075,7 @@ i_stz_zx:      ld   a,(de)          ; STZ $nn,X
                inc  de
                add  a,iyh           ; add X (may wrap in zero page)
                ld   l,a
-               ld   h,0
+               ld   h,zero_page_msb
                ld   (hl),h
                jp   (ix) ; zwrite_loop
 
@@ -1099,7 +1104,7 @@ i_adc_ix:      ld   a,(de)          ; ADX ($xx,X)
                inc  de
                add  a,iyh           ; add X (may wrap in zero page)
                ld   l,a
-               ld   h,0
+               ld   h,zero_page_msb
                ld   a,(hl)
                inc  hl
                ld   h,(hl)
@@ -1109,7 +1114,7 @@ i_adc_ix:      ld   a,(de)          ; ADX ($xx,X)
 i_adc_z:       ld   a,(de)          ; ADC $nn
                inc  de
                ld   l,a
-               ld   h,0
+               ld   h,zero_page_msb
                jp   i_adc
 
 i_adc_a:       ex   de,hl           ; ADC $nnnn
@@ -1124,7 +1129,7 @@ i_adc_zx:      ld   a,(de)          ; ADC $nn,X
                inc  de
                add  a,iyh           ; add X (may wrap in zero page)
                ld   l,a
-               ld   h,0
+               ld   h,zero_page_msb
                jp   i_adc
 
 i_adc_ay:      ld   a,(de)          ; ADC $nnnn,Y
@@ -1150,7 +1155,7 @@ i_adc_ax:      ld   a,(de)          ; ADC $nnnn,X
 i_adc_iy:      ld   a,(de)          ; ADC ($nn),Y
                inc  de
                ld   l,a
-               ld   h,0
+               ld   h,zero_page_msb
                ld   a,iyl           ; Y
                add  a,(hl)
                inc  l               ; (may wrap in zero page)
@@ -1186,7 +1191,7 @@ i_sbc_ix:      ld   a,(de)          ; SBC ($xx,X)
                inc  de
                add  a,iyh           ; add X (may wrap in zero page)
                ld   l,a
-               ld   h,0
+               ld   h,zero_page_msb
                ld   a,(hl)
                inc  hl
                ld   h,(hl)
@@ -1196,7 +1201,7 @@ i_sbc_ix:      ld   a,(de)          ; SBC ($xx,X)
 i_sbc_z:       ld   a,(de)          ; SBC $nn
                inc  de
                ld   l,a
-               ld   h,0
+               ld   h,zero_page_msb
                jp   i_sbc
 
 i_sbc_a:       ex   de,hl           ; SBC $nnnn
@@ -1211,7 +1216,7 @@ i_sbc_zx:      ld   a,(de)          ; SBC $nn,X
                inc  de
                add  a,iyh           ; add X (may wrap in zero page)
                ld   l,a
-               ld   h,0
+               ld   h,zero_page_msb
                jp   i_sbc
 
 i_sbc_ay:      ld   a,(de)          ; SBC $nnnn,Y
@@ -1237,7 +1242,7 @@ i_sbc_ax:      ld   a,(de)          ; SBC $nnnn,X
 i_sbc_iy:      ld   a,(de)          ; SBC ($nn),Y
                inc  de
                ld   l,a
-               ld   h,0
+               ld   h,zero_page_msb
                ld   a,iyl           ; Y
                add  a,(hl)
                inc  l               ; (may wrap in zero page)
@@ -1271,7 +1276,7 @@ i_and_ix:      ld   a,(de)          ; AND ($xx,X)
                inc  de
                add  a,iyh           ; add X (may wrap in zero page)
                ld   l,a
-               ld   h,0
+               ld   h,zero_page_msb
                ld   a,(hl)
                inc  hl
                ld   h,(hl)
@@ -1285,7 +1290,7 @@ i_and_ix:      ld   a,(de)          ; AND ($xx,X)
 i_and_z:       ld   a,(de)          ; AND $nn
                inc  de
                ld   l,a
-               ld   h,0
+               ld   h,zero_page_msb
                ld   a,b             ; A
                and  (hl)            ; A&x
                ld   b,a             ; set A
@@ -1308,7 +1313,7 @@ i_and_zx:      ld   a,(de)          ; AND $nn,X
                inc  de
                add  a,iyh           ; add X (may wrap in zero page)
                ld   l,a
-               ld   h,0
+               ld   h,zero_page_msb
                ld   a,b             ; A
                and  (hl)            ; A&x
                ld   b,a             ; set A
@@ -1346,7 +1351,7 @@ i_and_ax:      ld   a,(de)          ; AND $nnnn,X
 i_and_iy:      ld   a,(de)          ; AND ($nn),Y
                inc  de
                ld   l,a
-               ld   h,0
+               ld   h,zero_page_msb
                ld   a,iyl           ; Y
                add  a,(hl)
                inc  l               ; (may wrap in zero page)
@@ -1375,7 +1380,7 @@ i_eor_ix:      ld   a,(de)          ; EOR ($xx,X)
                inc  de
                add  a,iyh           ; add X (may wrap in zero page)
                ld   l,a
-               ld   h,0
+               ld   h,zero_page_msb
                ld   a,(hl)
                inc  hl
                ld   h,(hl)
@@ -1389,7 +1394,7 @@ i_eor_ix:      ld   a,(de)          ; EOR ($xx,X)
 i_eor_z:       ld   a,(de)          ; EOR $nn
                inc  de
                ld   l,a
-               ld   h,0
+               ld   h,zero_page_msb
                ld   a,b             ; A
                xor  (hl)            ; A^x
                ld   b,a             ; set A
@@ -1412,7 +1417,7 @@ i_eor_zx:      ld   a,(de)          ; EOR $nn,X
                inc  de
                add  a,iyh           ; add X (may wrap in zero page)
                ld   l,a
-               ld   h,0
+               ld   h,zero_page_msb
                ld   a,b             ; A
                xor  (hl)            ; A^x
                ld   b,a             ; set A
@@ -1450,7 +1455,7 @@ i_eor_ax:      ld   a,(de)          ; EOR $nnnn,X
 i_eor_iy:      ld   a,(de)          ; EOR ($nn),Y
                inc  de
                ld   l,a
-               ld   h,0
+               ld   h,zero_page_msb
                ld   a,iyl           ; Y
                add  a,(hl)
                inc  l               ; (may wrap in zero page)
@@ -1479,7 +1484,7 @@ i_ora_ix:      ld   a,(de)          ; ORA ($xx,X)
                inc  de
                add  a,iyh           ; add X (may wrap in zero page)
                ld   l,a
-               ld   h,0
+               ld   h,zero_page_msb
                ld   a,(hl)
                inc  hl
                ld   h,(hl)
@@ -1493,7 +1498,7 @@ i_ora_ix:      ld   a,(de)          ; ORA ($xx,X)
 i_ora_z:       ld   a,(de)          ; ORA $nn
                inc  de
                ld   l,a
-               ld   h,0
+               ld   h,zero_page_msb
                ld   a,b             ; A
                or   (hl)            ; A|x
                ld   b,a             ; set A
@@ -1516,7 +1521,7 @@ i_ora_zx:      ld   a,(de)          ; ORA $nn,X
                inc  de
                add  a,iyh           ; add X (may wrap in zero page)
                ld   l,a
-               ld   h,0
+               ld   h,zero_page_msb
                ld   a,b             ; A
                or   (hl)            ; A|x
                ld   b,a             ; set A
@@ -1554,7 +1559,7 @@ i_ora_ax:      ld   a,(de)          ; ORA $nnnn,X
 i_ora_iy:      ld   a,(de)          ; ORA ($nn),Y
                inc  de
                ld   l,a
-               ld   h,0
+               ld   h,zero_page_msb
                ld   a,iyl           ; Y
                add  a,(hl)
                inc  l               ; (may wrap in zero page)
@@ -1583,7 +1588,7 @@ i_cmp_ix:      ld   a,(de)          ; CMP ($xx,X)
                inc  de
                add  a,iyh           ; add X (may wrap in zero page)
                ld   l,a
-               ld   h,0
+               ld   h,zero_page_msb
                ld   a,(hl)
                inc  hl
                ld   h,(hl)
@@ -1599,7 +1604,7 @@ i_cmp_ix:      ld   a,(de)          ; CMP ($xx,X)
 i_cmp_z:       ld   a,(de)          ; CMP $nn
                inc  de
                ld   l,a
-               ld   h,0
+               ld   h,zero_page_msb
                ex   af,af'          ; carry
                ld   a,b             ; A
                sub  (hl)            ; A-x (result discarded)
@@ -1626,7 +1631,7 @@ i_cmp_zx:      ld   a,(de)          ; CMP $nn,X
                inc  de
                add  a,iyh           ; add X (may wrap in zero page)
                ld   l,a
-               ld   h,0
+               ld   h,zero_page_msb
                ex   af,af'          ; carry
                ld   a,b             ; A
                sub  (hl)            ; A-x (result discarded)
@@ -1670,7 +1675,7 @@ i_cmp_ax:      ld   a,(de)          ; CMP $nnnn,X
 i_cmp_iy:      ld   a,(de)          ; CMP ($nn),Y
                inc  de
                ld   l,a
-               ld   h,0
+               ld   h,zero_page_msb
                ld   a,iyl           ; Y
                add  a,(hl)
                inc  l               ; (may wrap in zero page)
@@ -1702,7 +1707,7 @@ i_cmp_i:       ld   h,d
 i_cpx_z:       ld   a,(de)          ; CPX $nn
                inc  de
                ld   l,a
-               ld   h,0
+               ld   h,zero_page_msb
                ex   af,af'          ; carry
                ld   a,iyh           ; X
                sub  (hl)            ; X-x (result discarded)
@@ -1740,7 +1745,7 @@ i_cpx_i:       ld   h,d
 i_cpy_z:       ld   a,(de)          ; CPY $nn
                inc  de
                ld   l,a
-               ld   h,0
+               ld   h,zero_page_msb
                ex   af,af'          ; carry
                ld   a,iyl           ; Y
                sub  (hl)            ; Y-x (result discarded)
@@ -1778,7 +1783,7 @@ i_cpy_i:       ld   h,d
 i_dec_z:       ld   a,(de)          ; DEC $nn
                inc  de
                ld   l,a
-               ld   h,0
+               ld   h,zero_page_msb
                dec  (hl)            ; zero-page--
                ld   c,(hl)          ; set N Z
                jp   (ix) ; zread_write_loop
@@ -1787,7 +1792,7 @@ i_dec_zx:      ld   a,(de)          ; DEC $nn,X
                inc  de
                add  a,iyh           ; add X (may wrap in zero page)
                ld   l,a
-               ld   h,0
+               ld   h,zero_page_msb
                dec  (hl)            ; zero-page--
                ld   c,(hl)          ; set N Z
                jp   (ix) ; zread_write_loop
@@ -1818,7 +1823,7 @@ i_dec_ax:      ld   a,(de)          ; DEC $nnnn,X
 i_inc_z:       ld   a,(de)          ; INC $nn
                inc  de
                ld   l,a
-               ld   h,0
+               ld   h,zero_page_msb
                inc  (hl)            ; zero-page++
                ld   c,(hl)          ; set N Z
                jp   (ix) ; zread_write_loop
@@ -1827,7 +1832,7 @@ i_inc_zx:      ld   a,(de)          ; INC $nn,X
                inc  de
                add  a,iyh           ; add X (may wrap in zero page)
                ld   l,a
-               ld   h,0
+               ld   h,zero_page_msb
                inc  (hl)            ; zero-page++
                ld   c,(hl)          ; set N Z
                jp   (ix) ; zread_write_loop
@@ -1858,7 +1863,7 @@ i_inc_ax:      ld   a,(de)          ; INC $nnnn,X
 i_asl_z:       ld   a,(de)          ; ASL $nn
                inc  de
                ld   l,a
-               ld   h,0
+               ld   h,zero_page_msb
                ex   af,af'
                sla  (hl)            ; x << 1
                ld   c,(hl)          ; set N Z
@@ -1869,7 +1874,7 @@ i_asl_zx:      ld   a,(de)          ; ASL $nn,X
                inc  de
                add  a,iyh           ; add X (may wrap in zero page)
                ld   l,a
-               ld   h,0
+               ld   h,zero_page_msb
                ex   af,af'
                sla  (hl)            ; x << 1
                ld   c,(hl)          ; set N Z
@@ -1912,7 +1917,7 @@ i_asl_acc:     ex   af,af'
 i_lsr_z:       ld   a,(de)          ; LSR $nn
                inc  de
                ld   l,a
-               ld   h,0
+               ld   h,zero_page_msb
                ex   af,af'
                srl  (hl)            ; x >> 1
                ld   c,(hl)          ; set N Z
@@ -1923,7 +1928,7 @@ i_lsr_zx:      ld   a,(de)          ; LSR $nn,X
                inc  de
                add  a,iyh           ; add X (may wrap in zero page)
                ld   l,a
-               ld   h,0
+               ld   h,zero_page_msb
                ex   af,af'
                srl  (hl)            ; x >> 1
                ld   c,(hl)          ; set N Z
@@ -1966,7 +1971,7 @@ i_lsr_acc:     ex   af,af'
 i_rol_z:       ld   a,(de)          ; ROL $nn
                inc  de
                ld   l,a
-               ld   h,0
+               ld   h,zero_page_msb
                ex   af,af'
                rl   (hl)            ; x << 1
                ld   c,(hl)          ; set N Z
@@ -1977,7 +1982,7 @@ i_rol_zx:      ld   a,(de)          ; ROL $nn,X
                inc  de
                add  a,iyh           ; add X (may wrap in zero page)
                ld   l,a
-               ld   h,0
+               ld   h,zero_page_msb
                ex   af,af'
                rl   (hl)            ; x << 1
                ld   c,(hl)          ; set N Z
@@ -2020,7 +2025,7 @@ i_rol_acc:     ex   af,af'
 i_ror_z:       ld   a,(de)          ; ROR $nn
                inc  de
                ld   l,a
-               ld   h,0
+               ld   h,zero_page_msb
                ex   af,af'
                rr   (hl)            ; x >> 1
                ld   c,(hl)          ; set N Z
@@ -2031,7 +2036,7 @@ i_ror_zx:      ld   a,(de)          ; ROR $nn,X
                inc  de
                add  a,iyh           ; add X (may wrap in zero page)
                ld   l,a
-               ld   h,0
+               ld   h,zero_page_msb
                ex   af,af'
                rr   (hl)            ; x >> 1
                ld   c,(hl)          ; set N Z
@@ -2074,14 +2079,14 @@ i_ror_acc:     ex   af,af'
 i_bit_z:       ld   a,(de)          ; BIT $nn
                inc  de
                ld   l,a
-               ld   h,0
+               ld   h,zero_page_msb
                jp   i_bit
 
 i_bit_zx:      ld   a,(de)          ; BIT $nn,X
                inc  de
                add  a,iyh           ; add X (may wrap in zero page)
                ld   l,a
-               ld   h,0
+               ld   h,zero_page_msb
                jp   i_bit
 
 i_bit_a:       ex   de,hl           ; BIT $nnnn
