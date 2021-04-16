@@ -2516,6 +2516,8 @@ decode_table:  defw i_brk,i_ora_ix,i_undoc_1,i_undoc_2     ; 00
 end:           equ  $
 size:          equ  end-base
 
-; For testing we include a sample tune (not supplied)
-;DUMP 3,0
-;MDAT "tunes\Thing_Bounces_Back.sid"
+; Tunes for testing (not supplied)
+               ;dump low_page,0
+               ;MDAT "selected\ThingBack.sid"              ; 50Hz
+               ;MDAT "selected\Driller.sid"                ; 60Hz
+               ;MDAT "selected\SYS4096.sid"                ; 100Hz (timer)
