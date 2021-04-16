@@ -2342,17 +2342,19 @@ record_block:  ld   de,(head)
                ld   bc,25
                ldir
 
+               ld   a,i             ; preserve iff1 to restore below
+               di                   ; critical section for int handler
                ld   hl,(blocks)
                inc  hl
                ld   (blocks),hl
+               ret  po
+               ei
                ret
 
 play_block:    ld   hl,(blocks)
                ld   a,h
                or   l
                ret  z
-               dec  hl              ; 1 less block available
-               ld   (blocks),hl
                ld   de,buffer_low
                sbc  hl,de
                jr   nc,buffer_ok    ; jump if we're not low
@@ -2366,12 +2368,15 @@ buffer_ok:     ld   a,buffer_page+rom0_off
                res  7,h             ; wrap in 32K block
                ld   (tail),hl
 
+               ld   hl,(blocks)
+               dec  hl              ; consumed 1 block
+               ld   (blocks),hl
+
                ld   a,&ff
                in   a,(keyboard)
                rra
                ret  c               ; return if Cntrl not pressed
 
-               ld   hl,(blocks)
                add  hl,hl
                ld   a,&3f
                sub  h
