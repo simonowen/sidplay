@@ -1,4 +1,4 @@
-; SID Player v1.4, by Simon Owen
+; SID Player v1.X, by Simon Owen
 ;
 ; WWW: http://simonowen.com/sam/sidplay/
 ;
@@ -21,25 +21,19 @@
 base:          equ  &d000           ; Player based at 53248
 
 buffer_blocks: equ  25              ; number of frames to pre-buffer
-buffer_low:    equ  10              ; low limit before screen disable
 
 sam_sid_port:  equ  &d4             ; base port for SAM SID interface
 
-zero_page_msb: equ  &00             ; 6502 zero page base MSB
-stack_msb:     equ  &01             ; 6502 stack base MSB
+zero_page_msb: equ  &e0             ; 6502 zero page base MSB
+stack_msb:     equ  &e1             ; 6502 stack base MSB
 
-status:        equ  249             ; Status port for active interrupts (input)
-line:          equ  249             ; Line interrupt (output)
 lmpr:          equ  250             ; Low Memory Page Register
-hmpr:          equ  251             ; High Memory Page Register
-midi:          equ  253             ; MIDI port
 border:        equ  254             ; Bits 5 and 3-0 hold border colour (output)
 keyboard:      equ  254             ; Main keyboard matrix (input)
 rom0_off:      equ  %00100000       ; LMPR bit to disable ROM0
+wprot_on:      equ  %10000000       ; LMPR bit to write-protect bank A
 
-low_page:      equ  3               ; LMPR during emulation
-high_page:     equ  5               ; HMPR during emulation
-buffer_page:   equ  7               ; base page for SID buffering
+rom_page:      equ  3               ; LMPR during emulation
 
 ret_ok:        equ  0               ; no error (space to exit)
 ret_space:     equ  ret_ok          ; space
@@ -52,14 +46,25 @@ ret_badfile:   equ  6               ; missing or invalid file
 ret_rsid:      equ  7               ; RSID files unsupported
 ret_timer:     equ  8               ; unsupported timer frequency
 
-m6502_nmi:     equ  &fffa           ; nmi vector address
-m6502_reset:   equ  &fffc           ; reset vector address
-m6502_int:     equ  &fffe           ; int vector address (also for BRK)
-
 c64_irq_vec:   equ  &0314           ; C64 IRQ vector
 c64_irq_cont:  equ  &ea31           ; C64 ROM IRQ chaining
 c64_cia_timer: equ  &dc04           ; C64 CIA#1 timer
 c64_sid_base:  equ  &d400           ; C64 SID chip
+
+z80_ret_op:    equ  &c9             ; RET opcode
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+               ; Spectrum ROM to simulate ZX 48K environment
+               dump rom_page,0
+               MDAT "48.rom"
+
+               ; position SID tune player code at &c000
+               ; this is the known load address for Thing on a Spring
+               org  &c000 - 126
+               dump $
+sid_file_base:
+               MDAT "Thing_On_A_Spring.sid"
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -78,84 +83,23 @@ start:         di
                ld   (old_stack+1),sp
                ld   sp,new_stack
 
-               ld   a,low_page+rom0_off
-               out  (lmpr),a        ; page in tune
-
-               ld   hl,0            ; SID file header
-               ld   a,(hl)
-               cp   "R"             ; RSID signature?
-               ld   c,ret_rsid
-               jp   z,exit_player
-               cp   "P"             ; new PSID signature?
-               jr   nz,old_file
-
-               ld   de,sid_header
-               ld   bc,22
-               ldir                 ; copy header to master copy
-old_file:      ex   af,af'          ; save Z flag for new file
-
-               ld   ix,sid_header
-               ld   a,(ix)
-               cp   "P"
-               ld   c,ret_badfile
-               jp   nz,exit_player
-
-               ld   a,high_page+rom0_off
+               ; Save SAM paging
+               in   a,(lmpr)
+               push af
+               ; page in Spectrum ROM
+               ld   a,rom_page+rom0_off+wprot_on
                out  (lmpr),a
 
-               ld   hl,&d000
-               ld   de,&d000-&8000
-               ld   bc,&1000
-               ldir                 ; copy player
 
-               ld   a,low_page+rom0_off
-               out  (lmpr),a        ; page tune back in
-               ld   a,high_page
-               out  (hmpr),a        ; activate player copy
+               ld   a,(sid_file_base+11)       ; init address (big-endian)
+               ld   (init_addr+0),a
+               ld   a,(sid_file_base+10)
+               ld   (init_addr+1),a
+               ld   a,(sid_file_base+13)       ; play address (big-endian)
+               ld   (play_addr+0),a
+               ld   a,(sid_file_base+12)
+               ld   (play_addr+1),a
 
-               ld   h,(ix+10)       ; init address
-               ld   l,(ix+11)
-               ld   (init_addr),hl
-               ld   h,(ix+12)       ; play address
-               ld   l,(ix+13)
-               ld   (play_addr),hl
-
-               ld   h,(ix+6)        ; data offset (big-endian)
-               ld   l,(ix+7)
-               ld   d,(ix+8)        ; load address (or zero)
-               ld   e,(ix+9)
-
-               ld   a,d
-               or   e
-               jr   nz,got_load     ; jump if address valid
-               ld   e,(hl)          ; take address from start of data
-               inc  l               ; (already little endian)
-               ld   d,(hl)
-               inc  l
-got_load:
-
-               ex   af,af'
-               jr   nz,no_reloc
-
-; At this point we have:  HL=sid_data DE=load_addr
-
-               ld   b,h
-               ld   c,l
-               ld   hl,&ffff
-               and  a
-               sbc  hl,de
-               add  hl,bc
-               ld   de,&ffff
-               ld   bc,&2000
-               lddr                 ; relocate e000-ffff
-               ld   bc,-&1000
-               add  hl,bc
-               ex   de,hl
-               add  hl,bc
-               ex   de,hl
-               ld   bc,&d000
-               lddr                 ; relocate 0000-cfff
-no_reloc:
                xor  a
                ld   h,zero_page_msb
                ld   l,a
@@ -163,8 +107,10 @@ clear_zp:      ld   (hl),a
                inc  l
                jr   nz,clear_zp
 
-               ld   b,(ix+15)       ; songs available
-               ld   c,(ix+17)       ; default start song
+               ld   a,(sid_file_base+15)       ; songs available
+               ld   b,a
+               ld   a,(sid_file_base+17)       ; default start song
+               ld   c,a
                ld   a,(song)        ; user requested song
                and  a               ; zero?
                jr   z,use_default   ; use default if so
@@ -174,40 +120,25 @@ clear_zp:      ld   (hl),a
 use_default:   ld   a,c
 got_song:      ld   (play_song),a   ; save song to play
 
-               ld   hl,sid_header+21  ; end of speed bit array
-speed_lp:      ld   c,1             ; start with bit 0
-speed_lp2:     dec  a
-               jr   z,got_speed
-               rl   c               ; shift up bit to check
-               jr   nc,speed_lp2
-               dec  hl
-               jr   speed_lp
-got_speed:     ld   a,(hl)
-               and  c
-               ld   (ntsc_tune),a
 
                call play_tune
                ld   c,a
                exx
-
                di
-               im   1
                call sid_reset
 
                exx
 exit_player:   ld   b,0
 
-               ld   a,31
+               ; restore SAM paging
+               pop  af
                out  (lmpr),a
-               ld   a,1
-               out  (hmpr),a
-               xor  a
-               out  (border),a
+
 old_stack:     ld   sp,0
+               ld   iy,10072        ; needed by ZX ROM int handler
+               im   1
                ei
                ret
-
-sid_header:    defs 22              ; copy of start of SID header
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -215,10 +146,11 @@ sid_header:    defs 22              ; copy of start of SID header
 
 play_tune:     ld   hl,0
                ld   (blocks),hl     ; no buffered blocks
-               ld   (head),hl       ; head/tail at buffer start
-               ld   (tail),hl
                ld   (c64_cia_timer),hl  ; no timer frequency
                ld   (c64_irq_vec),hl    ; no irq handler for timer
+               ld   h,&80
+               ld   (head),hl       ; head/tail at buffer start
+               ld   (tail),hl
 
                call reorder_decode  ; optimise decode table
 
@@ -257,20 +189,13 @@ buffer_loop:   ld   hl,(blocks)     ; current block count
                call record_block    ; record the state
                jr   buffer_loop     ; loop buffering more
 
-buffer_done:   call set_speed       ; set player speed
+buffer_done:   call check_speed     ; check for compatible playback speed
                call enable_player   ; enable interrupt-driven player
 
 sleep_loop:    halt                 ; wait for a block to play
 
 play_loop:     ld   a,(key_mask)    ; keys to ignore
                ld   b,a
-
-               ld   a,&f7
-               in   a,(status)      ; read extended keys
-               or   b
-               and  %00100000       ; check Esc
-               ld   a,ret_esc
-               ret  z               ; exit if pressed
 
                ld   a,&7f           ; bottom row
                in   a,(keyboard)    ; read keyboard
@@ -279,38 +204,8 @@ play_loop:     ld   a,(key_mask)    ; keys to ignore
                ld   a,ret_space
                ret  nc              ; exit if space pressed
 
-               ld   a,&ff           ; cursor keys + cntrl
-               in   a,(keyboard)
-               or   b               ; mask keys to ignore
-               rra                  ; key bit 0 (cntrl)
-               rra                  ; key bit 1 (up)
-               ld   c,a
-               ld   a,ret_up
-               ret  nc              ; return if pressed
-               inc  a
-               rr   c               ; key bit 2 (down)
-               ret  nc              ; return if pressed
-               inc  a
-               rr   c               ; key bit 3 (left)
-               ret  nc              ; return if pressed
-               inc  a
-               rr   c               ; key bit 3 (right)
-               ret  nc              ; return if pressed
-
-               ld   a,&f7
-               in   a,(keyboard)
-               rra
-               ld   c,a
-               call nc,set_100hz
-               bit  3,c
-               call z,set_50hz
-               ld   a,&ef
-               in   a,(keyboard)
-               bit  4,a
-               call z,set_60hz
-
                ld   hl,(blocks)     ; check buffered blocks
-               ld   de,32768/32-1   ; maximum we can buffer
+               ld   de,16384/32-1   ; maximum we can buffer
                and  a
                sbc  hl,de
                jr   nc,sleep_loop   ; jump back to wait if full
@@ -383,35 +278,6 @@ gap1:          equ  &d200-$         ; error if previous code is
 im2_table:     defs 257             ; 256 overlapped WORDs
 
 im2_handler:   push af
-               in   a,(status)      ; read status to check interrupts
-               rra
-               jr   nc,line_int
-               bit  3,a
-               jr   z,midi_int
-               bit  2,a
-               jr   nz,int_exit
-
-frame_int:     ld   a,(line_num)
-               and  a               ; zero?
-               jr   z,int_hit       ; frame int only for 50Hz
-               cp   step5_60Hz      ; 2nd step in border for 60Hz
-               jr   z,midi_start
-line_start:    cp   0               ; (self-modified value)
-               jr   z,line_set
-line_end:      cp   0               ; (self-modified value)
-               jr   nz,int_exit     ; skip frame interrupt
-               ld   a,(line_start+1); first step
-               jr   line_set        ; loop interrupt sequence
-
-line_int:      ld   a,(line_num)
-line_step1:    sub  0               ; (self-modified value)
-line_set:      out  (line),a
-               ld   (line_num),a
-
-int_hit:       in   a,(lmpr)
-               push af
-               ld   a,buffer_page+rom0_off
-               out  (lmpr),a
                push bc
                push de
                push hl
@@ -419,26 +285,9 @@ int_hit:       in   a,(lmpr)
                pop  hl
                pop  de
                pop  bc
-               pop  af
-               out  (lmpr),a
 int_exit:      pop  af
                ei
                reti
-
-midi_start:
-line_step2:    sub  0               ; adjust line for next step
-               ld   (line_num),a
-               ld   a,10
-               jr   midi_next       ; assumes NZ from sub above
-midi_int:      ld   a,0
-               dec  a
-midi_next:     ld   (midi_int+1),a
-               jr   z,int_hit
-               out  (midi),a
-               jr   int_exit
-
-line_num:      defb 0
-
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -2227,62 +2076,20 @@ sid_skip:      inc  hl
                ret
 
 
-start_50Hz:    equ  0
-step_50Hz:     equ  0
-end_50Hz:      equ  0
-
-start_60Hz:    equ  191             ; start on line 191
-step_60Hz:     equ  312/6           ; step back 52 lines
-step5_60Hz:    equ  start_60Hz-(4*step_60Hz) ; in top border
-end_60Hz:      equ  start_60Hz-(5*step_60Hz) ; frame int finish
-
-start_100Hz:   equ  88
-step_100Hz:    equ  0
-end_100Hz:     equ  start_100Hz
-
 ; Set playback speed, using timer first then ntsc flag
-set_speed:     ld   hl,(c64_cia_timer) ; C64 CIA#1 timer frequency
+check_speed:   ld   hl,(c64_cia_timer) ; C64 CIA#1 timer frequency
                ld   a,h
                or   l
-               jr   nz,use_timer    ; use if non-zero
-               ld   a,(ntsc_tune)   ; SID header said NTSC tune?
-               and  a
-               jr   nz,set_60hz     ; use 60Hz for NTSC
-
-set_50hz:      ld   h,start_50Hz
-;              ld   l,end_50Hz
-;              ld   a,step_50Hz
-set_exit:      ld   (line_step1+1),a
-               ld   (line_step2+1),a
-               ld   a,h
-               ld   (line_start+1),a
-               ld   (line_num),a
-               ld   a,l
-               ld   (line_end+1),a
-               ld   a,&ff
-               out  (line),a        ; disable line interrupts
-               ret
-set_60hz:      ld   h,start_60Hz
-               ld   l,end_60Hz
-               ld   a,step_60hz
-               jr   set_exit
-set_100hz:     ld   h,start_100Hz
-               ld   l,end_100Hz
-               ld   a,step_100Hz
-               jr   set_exit
+               ret  z               ; accept 50Hz and 60Hz
 
 ; 985248.4Hz / HL = playback frequency in Hz
 use_timer:     ld   a,h
-               cp   &22             ; 110Hz (PAL)
-               jr   c,bad_timer     ; reject >100Hz
-               cp   &2b             ; 90Hz
-               jr   c,set_100Hz     ; use 100Hz for 90-110Hz
                cp   &3b             ; 65Hz
                jr   c,bad_timer     ; reject 65<freq<90hz
                cp   &45             ; 55Hz
-               jr   c,set_60Hz      ; use 60Hz for 55-65Hz
+               ret  c               ; use 50Hz for 55-65Hz (compromise!)
                cp   &56             ; 45Hz
-               jr   c,set_50Hz      ; use 50Hz for 45-55Hz
+               ret  c               ; use 50Hz for 45-55Hz
                                     ; reject <45Hz
 bad_timer:     pop  hl              ; junk return address
                ld   a,ret_timer     ; unsupported frequency
@@ -2302,7 +2109,6 @@ tail:          defw 0               ; tail for playing data
 init_addr:     defw 0
 play_addr:     defw 0
 play_song:     defb 0
-ntsc_tune:     defb 0               ; non-zero for 60Hz tunes
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -2311,9 +2117,6 @@ ntsc_tune:     defb 0               ; non-zero for 60Hz tunes
 record_block:  ld   de,(head)
                ld   hl,sid_regs     ; record from live SID values
                ld   bc,25           ; 25 registers to copy
-
-               ld   a,buffer_page+rom0_off
-               out  (lmpr),a
                ldir
                ld   l,&24           ; changes for control 1
                ldi
@@ -2332,10 +2135,8 @@ record_block:  ld   de,(head)
                inc  e
                inc  e
                inc  de              ; top up to 32 byte block
-               res  7,d             ; wrap in 32K block
+               res  6,d             ; wrap C000 back to 8000
                ld   (head),de
-               ld   a,low_page+rom0_off
-               out  (lmpr),a
 
                ld   hl,sid_regs
                ld   de,prev_regs
@@ -2355,28 +2156,22 @@ play_block:    ld   hl,(blocks)
                ld   a,h
                or   l
                ret  z
-               ld   de,buffer_low
-               sbc  hl,de
-               jr   nc,buffer_ok    ; jump if we're not low
-               ld   a,128           ; screen off for speed boost
-               out  (border),a
 
-buffer_ok:     ld   a,buffer_page+rom0_off
-               out  (lmpr),a
                ld   hl,(tail)
                call sid_update
-               res  7,h             ; wrap in 32K block
+               res  6,h             ; wrap from C000 back to 8000
                ld   (tail),hl
 
                ld   hl,(blocks)
                dec  hl              ; consumed 1 block
                ld   (blocks),hl
 
-               ld   a,&ff
+               ld   a,&fe
                in   a,(keyboard)
                rra
-               ret  c               ; return if Cntrl not pressed
+               ret  c               ; return if Shift not pressed
 
+               add  hl,hl
                add  hl,hl
                ld   a,&3f
                sub  h
@@ -2428,6 +2223,8 @@ reorder_lp2:   ld   a,(bc)
                inc  c
                inc  l
                jr   nz,reorder_lp2
+               ld   a,z80_ret_op
+               ld   (reorder_decode),a ; this is a one-time operation
                ret
 
 gap6:          equ  &de00-$        ; error if previous code is
@@ -2515,9 +2312,3 @@ decode_table:  defw i_brk,i_ora_ix,i_undoc_1,i_undoc_2     ; 00
 
 end:           equ  $
 size:          equ  end-base
-
-; Tunes for testing (not supplied)
-               ;dump low_page,0
-               ;MDAT "selected\ThingBack.sid"              ; 50Hz
-               ;MDAT "selected\Driller.sid"                ; 60Hz
-               ;MDAT "selected\SYS4096.sid"                ; 100Hz (timer)
