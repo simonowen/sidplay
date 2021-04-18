@@ -1,5 +1,8 @@
-SID Player (v1.4)
+SID Player (v1.5)
 -----------------
+
+Version 1.5 (2021/04/19)
+- Proof-of-concept version for ZX Spectrum 48K
 
 Version 1.4 (2011/07/16)
 - Allow easier changing of SID interface base port
@@ -24,4 +27,4 @@ Version 1.0 (2004/12/07)
 ---
 
 Simon Owen
-http://simonowen.com/sam/sidplay/
+https://github.com/simonowen/sidplay

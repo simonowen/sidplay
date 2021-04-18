@@ -1,19 +1,18 @@
-; SID Player v1.X, by Simon Owen
+; SID Player v1.5, by Simon Owen
 ;
-; WWW: http://simonowen.com/sam/sidplay/
+; https://github.com/simonowen/sidplay
 ;
-; Emulates a 6510 CPU to play most C64 SID tunes in real time.
-; Requires SID interface board from Quazar or Velesoft
+; Emulates a 6510 CPU to play a C64 SID tunes in real time.
+; Requires ZX Spectrum SID interface using ports xxCF
 ;
-; Load PSID file at &10000 and call &d000 to play
+; RANDOMIZE USR 53248 to play sample tune (Thing on a Spring)
 ; POKE &d002,tune-number (default=0, for SID default)
 ; POKE &d003,key-mask (binary: 0,0,Esc,Right,Left,Down,Up,Space)
 ; DPOKE &d004,pre-buffer-frames (default=25, for 0.5 seconds)
 ;
 ; Features:
 ;   - Full 6510 emulation in Z80
-;   - PAL (50Hz), NTSC (60Hz) and 100Hz playback speeds
-;   - Support PSID files up to 64K
+;   - PAL (50Hz) playback speed only
 ;   - Both polled and timer-driven players
 ;
 ; RSID files and sound samples are not supported.
@@ -22,18 +21,13 @@ base:          equ  &d000           ; Player based at 53248
 
 buffer_blocks: equ  25              ; number of frames to pre-buffer
 
-sam_sid_port:  equ  &d4             ; base port for SAM SID interface
+zx_sid_port:   equ  &cf             ; base port for SID interface
 
 zero_page_msb: equ  &e0             ; 6502 zero page base MSB
 stack_msb:     equ  &e1             ; 6502 stack base MSB
 
-lmpr:          equ  250             ; Low Memory Page Register
-border:        equ  254             ; Bits 5 and 3-0 hold border colour (output)
-keyboard:      equ  254             ; Main keyboard matrix (input)
-rom0_off:      equ  %00100000       ; LMPR bit to disable ROM0
-wprot_on:      equ  %10000000       ; LMPR bit to write-protect bank A
-
-rom_page:      equ  3               ; LMPR during emulation
+border:        equ  254             ; Bits 3-0 hold border colour (output)
+keyboard:      equ  254             ; Keyboard matrix (input)
 
 ret_ok:        equ  0               ; no error (space to exit)
 ret_space:     equ  ret_ok          ; space
@@ -45,9 +39,8 @@ ret_esc:       equ  5               ; esc
 ret_badfile:   equ  6               ; missing or invalid file
 ret_rsid:      equ  7               ; RSID files unsupported
 ret_timer:     equ  8               ; unsupported timer frequency
+ret_irq:       equ  9               ; unsupported irq handler
 
-c64_irq_vec:   equ  &0314           ; C64 IRQ vector
-c64_irq_cont:  equ  &ea31           ; C64 ROM IRQ chaining
 c64_cia_timer: equ  &dc04           ; C64 CIA#1 timer
 c64_sid_base:  equ  &d400           ; C64 SID chip
 
@@ -55,23 +48,15 @@ z80_ret_op:    equ  &c9             ; RET opcode
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-               ; Spectrum ROM to simulate ZX 48K environment
-               dump rom_page,0
-               MDAT "48.rom"
-
                ; position SID tune player code at &c000
                ; this is the known load address for Thing on a Spring
                org  &c000 - 126
-               dump $
 sid_file_base:
-               MDAT "Thing_On_A_Spring.sid"
+               incbin "Thing_On_A_Spring.sid"
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
                org  base
-               dump $
-               autoexec             ; set the code file as auto-executing
-
                jr   start
 
 song:          defb 0               ; 0=default song from SID header
@@ -82,14 +67,6 @@ start:         di
 
                ld   (old_stack+1),sp
                ld   sp,new_stack
-
-               ; Save SAM paging
-               in   a,(lmpr)
-               push af
-               ; page in Spectrum ROM
-               ld   a,rom_page+rom0_off+wprot_on
-               out  (lmpr),a
-
 
                ld   a,(sid_file_base+11)       ; init address (big-endian)
                ld   (init_addr+0),a
@@ -130,12 +107,10 @@ got_song:      ld   (play_song),a   ; save song to play
                exx
 exit_player:   ld   b,0
 
-               ; restore SAM paging
-               pop  af
-               out  (lmpr),a
-
 old_stack:     ld   sp,0
-               ld   iy,10072        ; needed by ZX ROM int handler
+               ld   iy,23610        ; needed by ZX ROM int handler
+               ld   hl,10072
+               exx
                im   1
                ei
                ret
@@ -147,7 +122,6 @@ old_stack:     ld   sp,0
 play_tune:     ld   hl,0
                ld   (blocks),hl     ; no buffered blocks
                ld   (c64_cia_timer),hl  ; no timer frequency
-               ld   (c64_irq_vec),hl    ; no irq handler for timer
                ld   h,&80
                ld   (head),hl       ; head/tail at buffer start
                ld   (tail),hl
@@ -169,10 +143,8 @@ play_tune:     ld   hl,0
                or   l
                jr   nz,buffer_loop  ; non-zero means we have one
 
-               ld   hl,(c64_irq_vec); use custom handler
-               ld   a,&40           ; rti 6502 opcode
-               ld   (c64_irq_cont),a ; no ROM IRQ continuation
-               ld   (play_addr),hl  ; store play address
+               ld   a,ret_irq       ; no IRQ handler support yet
+               ret
 
 buffer_loop:   ld   hl,(blocks)     ; current block count
                ld   de,(pre_buffer) ; blocks to pre-buffer
@@ -205,7 +177,7 @@ play_loop:     ld   a,(key_mask)    ; keys to ignore
                ret  nc              ; exit if space pressed
 
                ld   hl,(blocks)     ; check buffered blocks
-               ld   de,16384/32-1   ; maximum we can buffer
+               ld   de,8192/32-1    ; maximum we can buffer
                and  a
                sbc  hl,de
                jr   nc,sleep_loop   ; jump back to wait if full
@@ -1988,7 +1960,7 @@ gap3:          equ  &dc00-$        ; error if previous code is
 ; SID interface functions
 
 sid_reset:     ld   hl,last_regs
-               ld   bc,sam_sid_port
+               ld   bc,zx_sid_port
                ld   d,b            ; write 0 to all registers
                ld   a,25           ; 25 registers to write
 reset_loop:    out  (c),d          ; write to register
@@ -2008,7 +1980,7 @@ reset_loop:    out  (c),d          ; write to register
                ret
 
 sid_update:    ex   de,hl          ; switch new values to DE
-               ld   c,sam_sid_port ; SID interface base port
+               ld   c,zx_sid_port  ; SID interface base port
 
                ld   hl,25          ; control 1 changes offset
                add  hl,de
@@ -2135,7 +2107,7 @@ record_block:  ld   de,(head)
                inc  e
                inc  e
                inc  de              ; top up to 32 byte block
-               res  6,d             ; wrap C000 back to 8000
+               res  5,d             ; wrap A000 back to 8000
                ld   (head),de
 
                ld   hl,sid_regs
@@ -2159,7 +2131,7 @@ play_block:    ld   hl,(blocks)
 
                ld   hl,(tail)
                call sid_update
-               res  6,h             ; wrap from C000 back to 8000
+               res  5,h             ; wrap from A000 back to 8000
                ld   (tail),hl
 
                ld   hl,(blocks)
@@ -2171,8 +2143,9 @@ play_block:    ld   hl,(blocks)
                rra
                ret  c               ; return if Shift not pressed
 
-               add  hl,hl
-               add  hl,hl
+               add  hl,hl           ; <=32K buffer
+               add  hl,hl           ; <=16K buffer
+               add  hl,hl           ; <=8K buffer
                ld   a,&3f
                sub  h
                and  %00000111
@@ -2310,5 +2283,4 @@ decode_table:  defw i_brk,i_ora_ix,i_undoc_1,i_undoc_2     ; 00
                defw i_sed,i_sbc_ay,i_undoc_1,i_undoc_3     ; F8
                defw i_undoc_3,i_sbc_ax,i_inc_ax,i_undoc_2  ; FC
 
-end:           equ  $
-size:          equ  end-base
+end base ; auto-run address
