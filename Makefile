@@ -4,18 +4,15 @@ UNAME := $(shell uname -s)
 
 .PHONY: clean
 
-$(NAME).dsk: $(NAME).asm $(DEPS)
-	pyz80.py -I samdos2 --mapfile=$(NAME).map $(NAME).asm
+$(NAME).tap: $(NAME).asm $(DEPS)
+	pasmo -v --tapbas $(NAME).asm $(NAME).tap $(NAME).sym
 
-run: $(NAME).dsk
+run: $(NAME).tap
 ifeq ($(UNAME),Darwin)
-	open $(NAME).dsk
+	open $(NAME).tap
 else
-	xdg-open $(NAME).dsk
+	xdg-open $(NAME).tap
 endif
 
-net: $(NAME).dsk
-	samdisk $(NAME).dsk sam:
-
 clean:
-	rm -f $(NAME).dsk $(NAME).map
+	rm -f $(NAME).tap $(NAME).sym

@@ -11,7 +11,7 @@ if "%1"=="run" start %NAME%.tap
 goto end
 
 :clean
-del /q %NAME%.tap %NAME%.sym %NAME%.o 2>nul
+del /q %NAME%.tap %NAME%.sym 2>nul
 
 :end
 endlocal
